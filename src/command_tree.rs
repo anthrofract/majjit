@@ -435,6 +435,12 @@ impl CommandTree {
                 CommandTreeNode::new_action(Message::Edit),
             ),
             (
+                "Edit",
+                "Entered revision/bookmark",
+                vec![KeyCode::Char('e'), KeyCode::Char('E')],
+                CommandTreeNode::new_action(Message::EditTarget),
+            ),
+            (
                 "Commands",
                 "Evolog",
                 vec![KeyCode::Char('E')],
@@ -725,6 +731,12 @@ impl CommandTree {
                 "After trunk (sync)",
                 vec![KeyCode::Char('n'), KeyCode::Char('M')],
                 CommandTreeNode::new_action(Message::NewAfterTrunkSync),
+            ),
+            (
+                "New",
+                "After entered revision/bookmark",
+                vec![KeyCode::Char('n'), KeyCode::Char('N')],
+                CommandTreeNode::new_action(Message::NewAtTarget),
             ),
             (
                 "Commands",

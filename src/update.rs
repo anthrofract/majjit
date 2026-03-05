@@ -33,6 +33,7 @@ pub enum Message {
         destination: DuplicateDestination,
     },
     Edit,
+    EditTarget,
     Evolog {
         patch: bool,
     },
@@ -57,6 +58,7 @@ pub enum Message {
     New {
         mode: NewMode,
     },
+    NewAtTarget,
     NewAfterTrunkSync,
     RebaseSelectedBranchOntoTrunk,
     RebaseSelectedBranchOntoTrunkSync,
@@ -416,6 +418,7 @@ fn handle_msg(term: Term, model: &mut Model, msg: Message) -> Result<Option<Mess
             destination,
         } => model.jj_duplicate(destination_type, destination)?,
         Message::Edit => model.jj_edit()?,
+        Message::EditTarget => model.jj_edit_target(term)?,
         Message::Evolog { patch } => model.jj_evolog(patch, term)?,
         Message::FileTrack => model.jj_file_track(term)?,
         Message::FileUntrack => model.jj_file_untrack()?,
@@ -424,6 +427,7 @@ fn handle_msg(term: Term, model: &mut Model, msg: Message) -> Result<Option<Mess
         Message::Interdiff { mode } => model.jj_interdiff(mode, term)?,
         Message::Metaedit { action } => model.jj_metaedit(action, term)?,
         Message::New { mode } => model.jj_new(mode)?,
+        Message::NewAtTarget => model.jj_new_at_target(term)?,
         Message::NewAfterTrunkSync => model.jj_new_after_trunk_sync()?,
         Message::RebaseSelectedBranchOntoTrunk => model.jj_rebase_selected_branch_onto_trunk()?,
         Message::RebaseSelectedBranchOntoTrunkSync => {

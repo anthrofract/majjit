@@ -750,6 +750,15 @@ impl Model {
         self.queue_jj_command(cmd)
     }
 
+    pub fn jj_edit_target(&mut self, term: Term) -> Result<()> {
+        let Some(target) = get_input_from_editor(term, None, Some("Enter the target to edit"))?
+        else {
+            return self.cancelled();
+        };
+        let cmd = JjCommand::edit(&target, self.global_args.clone());
+        self.queue_jj_command(cmd)
+    }
+
     pub fn jj_evolog(&mut self, patch: bool, term: Term) -> Result<()> {
         let Some(change_id) = self.get_selected_change_id() else {
             return self.invalid_selection();
@@ -953,6 +962,16 @@ impl Model {
         let fetch_cmd = JjCommand::git_fetch(None, None, self.global_args.clone());
         let new_cmd = JjCommand::new("trunk()", &[], self.global_args.clone());
         self.queue_jj_commands(vec![fetch_cmd, new_cmd])
+    }
+
+    pub fn jj_new_at_target(&mut self, term: Term) -> Result<()> {
+        let Some(target) =
+            get_input_from_editor(term, None, Some("Enter the revision or bookmark"))?
+        else {
+            return self.cancelled();
+        };
+        let cmd = JjCommand::new(&target, &[], self.global_args.clone());
+        self.queue_jj_command(cmd)
     }
 
     pub fn jj_next_prev(
