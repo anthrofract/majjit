@@ -21,6 +21,8 @@ use ratatui::{
     widgets::ListState,
 };
 
+pub const DEFAULT_REVSET: &str = "root() | remote_bookmarks() | ancestors(immutable_heads().., 24)";
+
 const LOG_LIST_SCROLL_PADDING: usize = 0;
 
 #[derive(Default, Debug, PartialEq, Eq)]

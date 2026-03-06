@@ -1,4 +1,3 @@
-mod cli;
 mod command_tree;
 mod log_tree;
 mod model;
@@ -13,9 +12,21 @@ use crate::view::view;
 
 use anyhow::Result;
 use clap::Parser;
-use cli::Args;
+use model::DEFAULT_REVSET;
 use shell_out::JjCommand;
 use terminal::Term;
+
+#[derive(Parser, Debug)]
+#[command(version, about = "Jjdag: A TUI to manipulate the Jujutsu DAG")]
+struct Args {
+    /// Path to repository to operate on
+    #[arg(short = 'R', long, default_value = ".")]
+    repository: String,
+
+    /// Which revisions to show
+    #[arg(short = 'r', long, value_name = "REVSETS", default_value = DEFAULT_REVSET)]
+    revisions: String,
+}
 
 fn main() {
     let result = run();
