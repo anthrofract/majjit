@@ -58,6 +58,7 @@ pub enum Message {
     New {
         mode: NewMode,
     },
+    Open,
     NewAtTarget,
     NewAfterTrunkSync,
     RebaseSelectedBranchOntoTrunk,
@@ -429,6 +430,7 @@ fn handle_msg(term: Term, model: &mut Model, msg: Message) -> Result<Option<Mess
         Message::Metaedit { action } => model.jj_metaedit(action, term)?,
         Message::New { mode } => model.jj_new(mode)?,
         Message::NewAtTarget => model.jj_new_at_target(term)?,
+        Message::Open => model.open_file(term)?,
         Message::NewAfterTrunkSync => model.jj_new_after_trunk_sync()?,
         Message::RebaseSelectedBranchOntoTrunk => model.jj_rebase_selected_branch_onto_trunk()?,
         Message::RebaseSelectedBranchOntoTrunkSync => {

@@ -746,6 +746,12 @@ impl CommandTree {
             ),
             (
                 "Commands",
+                "Open",
+                vec![KeyCode::Char('o')],
+                CommandTreeNode::new_action(Message::Open),
+            ),
+            (
+                "Commands",
                 "Resolve",
                 vec![KeyCode::Char('O')],
                 CommandTreeNode::new_action(Message::Resolve),

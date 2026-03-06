@@ -1,7 +1,7 @@
 use crate::{
     command_tree::{CommandTree, display_unbound_error_lines},
     log_tree::{DIFF_HUNK_LINE_IDX, JjLog, LogTreeNode, TreePosition, get_parent_tree_position},
-    shell_out::{JjCommand, JjCommandError, get_input_from_editor},
+    shell_out::{JjCommand, JjCommandError, get_input_from_editor, open_file_in_editor},
     terminal::Term,
     update::{
         AbandonMode, AbsorbMode, BookmarkMoveMode, DuplicateDestination, DuplicateDestinationType,
@@ -512,6 +512,19 @@ impl Model {
         self.saved_file_path = self.get_selected_file_path().map(String::from);
         self.saved_tree_position = Some(self.get_selected_tree_position());
 
+        Ok(())
+    }
+
+    pub fn open_file(&mut self, term: Term) -> Result<()> {
+        if !self.is_selected_working_copy() {
+            return self.invalid_selection();
+        }
+        let Some(file_path) = self.get_selected_file_path() else {
+            return self.invalid_selection();
+        };
+        let full_path = format!("{}/{}", self.global_args.repository, file_path);
+        open_file_in_editor(term, &full_path)?;
+        self.info_list = Some(Text::from(format!("Opened {file_path}")));
         Ok(())
     }
 

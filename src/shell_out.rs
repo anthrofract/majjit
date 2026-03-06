@@ -671,6 +671,17 @@ pub fn get_input_from_editor(
     }
 }
 
+pub fn open_file_in_editor(interactive_term: Term, file_path: &str) -> Result<()> {
+    let editor = env::var("EDITOR").unwrap_or_else(|_| "vim".to_string());
+    terminal::relinquish_terminal()?;
+    let status = Command::new(&editor).arg(file_path).status()?;
+    terminal::takeover_terminal(&interactive_term)?;
+    if !status.success() {
+        anyhow::bail!("'{editor}' exited with status {status} for '{file_path}'");
+    }
+    Ok(())
+}
+
 fn strip_non_style_ansi(str: &str) -> String {
     let non_style_ansi_regex =
         Regex::new(r"\x1b(\[[0-9;?]*[ -/]*([@-l]|[n-~])|\].*?(\x07|\x1b\\)|P.*?\x1b\\)").unwrap();
