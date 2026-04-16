@@ -214,6 +214,9 @@ pub struct Commit {
     has_conflict: bool,
     _empty: bool,
     pub description_first_line: Option<String>,
+    pub email: String,
+    pub timestamp: String,
+    pub bookmarks: Vec<String>,
     symbol: String,
     line1_graph_chars: String,
     line1_graph_chars_part2: String,
@@ -230,49 +233,51 @@ pub struct Commit {
 impl Commit {
     fn new(pretty_string: String) -> Result<Self> {
         let clean_string = strip_ansi(&pretty_string);
-        let re_fields = Regex::new(
-            r"^([ │]*)(.)([ │]*)  ([k-z]{8,}(?:/\d+)?)\s+.*\s+([a-f0-9]{8,})\s*(\S*)\s*\n([ │├┤┬┴╭╮╯╰─┼]*)(\(empty\))?\s*(.*)",
-        )?;
         let re_lines = Regex::new(r"^[ │]*\S+[ │]*(.*)\n[ │├┤┬┴╭╮╯╰─┼]*(.*)")?;
+
+        if clean_string.contains("root()") {
+            return Self::new_root(clean_string, pretty_string, &re_lines);
+        }
+
+        let re_fields = Regex::new(
+            r"^([ │]*)(.)([ │]*)  ([k-z]{8,}(?:/\d+)?)\s+(\S+)\s+(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})\s*(.*?)\s+([a-f0-9]{8,})\s*(\S*)\s*\n([ │├┤┬┴╭╮╯╰─┼]*)(\(empty\))?\s*(.*)",
+        )?;
 
         let captures = re_fields
             .captures(&clean_string)
             .ok_or_else(|| anyhow!("Cannot parse commit fields: {:?}", clean_string))?;
-        let line1_graph_chars: String = captures
-            .get(1)
-            .ok_or_else(|| anyhow!("Cannot parse line 1 graph chars"))?
-            .as_str()
-            .into();
-        let symbol = captures
-            .get(2)
-            .ok_or_else(|| anyhow!("Cannot parse commit symbol"))?
-            .as_str()
-            .into();
-        let line1_graph_chars_part2 = captures
-            .get(3)
-            .ok_or_else(|| anyhow!("Cannot parse line 1 graph chars part 2"))?
-            .as_str()
-            .into();
-        let change_id = captures
-            .get(4)
-            .ok_or_else(|| anyhow!("Cannot parse commit change id"))?
-            .as_str()
-            .into();
-        let commit_id = captures
-            .get(5)
-            .ok_or_else(|| anyhow!("Cannot parse commit id"))?
-            .as_str()
-            .into();
-        let conflict_status: String = captures
-            .get(6)
-            .ok_or_else(|| anyhow!("Cannot parse conflict status"))?
-            .as_str()
-            .into();
-        let line2_graph_chars: String = captures
-            .get(7)
-            .ok_or_else(|| anyhow!("Cannot parse line 2 graph chars"))?
-            .as_str()
-            .into();
+        let line1_graph_chars: String = captures[1].into();
+        let symbol: String = captures[2].into();
+        let line1_graph_chars_part2: String = captures[3].into();
+        let change_id: String = captures[4].into();
+        let email: String = captures[5].into();
+        let timestamp: String = captures[6].into();
+        let bookmarks_str: &str = &captures[7];
+        let commit_id: String = captures[8].into();
+        let conflict_status: &str = &captures[9];
+        let line2_graph_chars: String = captures[10].into();
+        let empty = captures.get(11).is_some();
+        let description_string: &str = &captures[12];
+
+        let bookmarks: Vec<String> = bookmarks_str
+            .split_whitespace()
+            .map(|s| s.to_string())
+            .collect();
+
+        let current_working_copy = symbol == "@";
+        let has_conflict = conflict_status == "(conflict)";
+        let description_first_line = if description_string == "(no description set)" {
+            None
+        } else {
+            Some(description_string.to_string())
+        };
+
+        let captures = re_lines
+            .captures(&pretty_string)
+            .ok_or_else(|| anyhow!("Cannot parse commit lines: {:?}", pretty_string))?;
+        let pretty_line1: String = captures[1].into();
+        let pretty_line2: String = captures[2].into();
+
         let mut graph_indent: String = line2_graph_chars
             .chars()
             .map(|c| match c {
@@ -280,36 +285,7 @@ impl Commit {
                 _ => ' ',
             })
             .collect();
-        graph_indent.pop(); // Even out with our spacing
-        let empty_capture = captures.get(8);
-        let description_string: String = captures
-            .get(9)
-            .ok_or_else(|| anyhow!("Cannot parse description string"))?
-            .as_str()
-            .into();
-
-        let current_working_copy = symbol == "@";
-        let has_conflict = conflict_status == "(conflict)";
-        let empty = empty_capture.is_some();
-        let description_first_line = if description_string == "(no description set)" {
-            None
-        } else {
-            Some(description_string)
-        };
-
-        let captures = re_lines
-            .captures(&pretty_string)
-            .ok_or_else(|| anyhow!("Cannot parse commit lines: {:?}", pretty_string))?;
-        let pretty_line1 = captures
-            .get(1)
-            .ok_or_else(|| anyhow!("Cannot parse commit line1"))?
-            .as_str()
-            .into();
-        let pretty_line2 = captures
-            .get(2)
-            .ok_or_else(|| anyhow!("Cannot parse commit line2"))?
-            .as_str()
-            .into();
+        graph_indent.pop();
 
         Ok(Commit {
             change_id,
@@ -318,6 +294,63 @@ impl Commit {
             has_conflict,
             _empty: empty,
             description_first_line,
+            email,
+            timestamp,
+            bookmarks,
+            symbol,
+            line1_graph_chars,
+            line1_graph_chars_part2,
+            line2_graph_chars,
+            pretty_line1,
+            pretty_line2,
+            graph_indent,
+            unfolded: false,
+            loaded: false,
+            file_diffs: Vec::new(),
+            flat_log_idx: 0,
+        })
+    }
+
+    fn new_root(clean_string: String, pretty_string: String, re_lines: &Regex) -> Result<Self> {
+        let re_root = Regex::new(
+            r"^([ │]*)(.)([ │]*)  ([k-z]{8,}(?:/\d+)?)\s+.*\s+([a-f0-9]{8,})\s*\n([ │├┤┬┴╭╮╯╰─┼]*)(.*)",
+        )?;
+
+        let captures = re_root
+            .captures(&clean_string)
+            .ok_or_else(|| anyhow!("Cannot parse root commit: {:?}", clean_string))?;
+        let line1_graph_chars: String = captures[1].into();
+        let symbol: String = captures[2].into();
+        let line1_graph_chars_part2: String = captures[3].into();
+        let change_id: String = captures[4].into();
+        let commit_id: String = captures[5].into();
+        let line2_graph_chars: String = captures[6].into();
+
+        let captures = re_lines
+            .captures(&pretty_string)
+            .ok_or_else(|| anyhow!("Cannot parse root commit lines: {:?}", pretty_string))?;
+        let pretty_line1: String = captures[1].into();
+        let pretty_line2: String = captures[2].into();
+
+        let mut graph_indent: String = line2_graph_chars
+            .chars()
+            .map(|c| match c {
+                '│' | '├' | '┤' | '┬' | '╭' | '╮' | '┼' => '│',
+                _ => ' ',
+            })
+            .collect();
+        graph_indent.pop();
+
+        Ok(Commit {
+            change_id,
+            _commit_id: commit_id,
+            current_working_copy: false,
+            has_conflict: false,
+            _empty: false,
+            description_first_line: None,
+            email: String::new(),
+            timestamp: String::new(),
+            bookmarks: Vec::new(),
             symbol,
             line1_graph_chars,
             line1_graph_chars_part2,
