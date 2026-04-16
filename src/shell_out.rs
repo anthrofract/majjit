@@ -1,3 +1,4 @@
+use crate::log_tree::COMMIT_FIELD_MARKER;
 use crate::model::GlobalArgs;
 use crate::terminal::{self, Term};
 use anyhow::{Result, anyhow};
@@ -188,13 +189,23 @@ impl JjCommand {
     }
 
     pub fn jj_log(revset: &str, global_args: GlobalArgs) -> Self {
-        let args = [
-            "log",
-            "--template",
-            "builtin_log_compact",
-            "--revisions",
-            revset,
-        ];
+        let m = COMMIT_FIELD_MARKER;
+        let template = format!(
+            r#"stringify(concat(
+                "{m}", change_id.shortest(8), if(divergent, "/" ++ change_offset),
+                "{m}", commit_id.shortest(8),
+                "{m}", if(current_working_copy, "Y", "N"),
+                "{m}", if(conflict, "Y", "N"),
+                "{m}", if(empty, "Y", "N"),
+                "{m}", if(root, "Y", "N"),
+                "{m}", local_bookmarks.map(|b| b.name()).join(" "),
+                "{m}", coalesce(author.email(), ""),
+                "{m}", author.timestamp().local().format("%Y-%m-%d %H:%M:%S"),
+                "{m}", coalesce(description.first_line(), ""),
+                "{m}"
+            )) ++ builtin_log_compact"#,
+        );
+        let args = ["log", "--template", &template, "--revisions", revset];
         Self::new(&args, global_args, None, ReturnOutput::Stdout)
     }
 

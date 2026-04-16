@@ -191,7 +191,7 @@ impl Model {
         // Start with @ selected and unfolded
         let list_idx = match self.jj_log.get_current_commit() {
             None => 0,
-            Some(commit) => commit.flat_log_idx,
+            Some(commit) => commit.flat_log_idx(),
         };
         self.log_select(list_idx);
         self.toggle_current_fold()
@@ -291,7 +291,7 @@ impl Model {
         let commit_idx = self
             .jj_log
             .get_tree_commit(saved_tree_position)
-            .map(|commit| commit.flat_log_idx);
+            .map(|commit| commit.flat_log_idx());
         let file_diff_idx = self
             .jj_log
             .get_tree_file_diff(saved_tree_position)
@@ -396,7 +396,7 @@ impl Model {
 
     pub fn select_current_working_copy(&mut self) {
         if let Some(commit) = self.jj_log.get_current_commit() {
-            self.log_select(commit.flat_log_idx);
+            self.log_select(commit.flat_log_idx());
         }
     }
 
@@ -408,7 +408,7 @@ impl Model {
                 continue;
             };
             let target = if with_log_idx_targets {
-                Some(commit.flat_log_idx.to_string())
+                Some(commit.flat_log_idx().to_string())
             } else {
                 None
             };
@@ -449,7 +449,7 @@ impl Model {
             };
             candidates.push(FuzzyCandidate {
                 display: description.clone(),
-                target: Some(commit.flat_log_idx.to_string()),
+                target: Some(commit.flat_log_idx().to_string()),
             });
         }
 
@@ -463,7 +463,7 @@ impl Model {
             let crate::log_tree::CommitOrText::Commit(commit) = item else {
                 continue;
             };
-            let target = Some(commit.flat_log_idx.to_string());
+            let target = Some(commit.flat_log_idx().to_string());
             for bookmark in &commit.bookmarks {
                 candidates.push(FuzzyCandidate {
                     display: bookmark.clone(),

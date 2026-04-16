@@ -3,7 +3,7 @@ use crate::shell_out::JjCommand;
 use ansi_to_tui::IntoText;
 use anyhow::{Error, Result, anyhow, bail};
 use ratatui::{
-    style::{Color, Modifier, Style},
+    style::{Color, Style},
     text::{Line, Span, Text},
 };
 use regex::Regex;
@@ -160,23 +160,19 @@ pub enum CommitOrText {
 impl CommitOrText {
     fn load_all(global_args: &GlobalArgs, revset: &str) -> Result<Vec<Self>> {
         let output = JjCommand::jj_log(revset, global_args.clone()).run()?;
-        let mut lines = output.trim().lines();
-        let re = Regex::new(r"^.+([k-z]{8}(?:/\d+)?)\s+.*\s+([a-f0-9]{8}).*$")?;
+        let mut lines = output.trim().lines().peekable();
 
         let mut commits_or_texts = Vec::new();
-        loop {
-            let line1 = match lines.next() {
-                None => break,
-                Some(line) => line,
-            };
-
-            if re.captures(&strip_ansi(line1)).is_none() {
+        while let Some(line1) = lines.next() {
+            if !line1.contains(COMMIT_FIELD_MARKER) {
                 commits_or_texts.push(Self::InfoText(InfoText::new(line1.to_string())));
                 continue;
-            };
+            }
 
-            let line2 = lines.next().unwrap_or_default();
-            commits_or_texts.push(Self::Commit(Commit::new(format!("{line1}\n{line2}"))?));
+            let line2 = lines
+                .next_if(|next| !next.contains(COMMIT_FIELD_MARKER))
+                .map(str::to_string);
+            commits_or_texts.push(Self::Commit(Commit::new(line1.to_string(), line2)?));
         }
 
         Ok(commits_or_texts)
@@ -211,152 +207,72 @@ pub struct Commit {
     pub change_id: String,
     pub commit_id: String,
     pub current_working_copy: bool,
-    has_conflict: bool,
-    _empty: bool,
+    pub bookmarks: Vec<String>,
     pub description_first_line: Option<String>,
+    _has_conflict: bool,
+    _empty: bool,
+    _is_root: bool,
     _email: String,
     _timestamp: String,
-    pub bookmarks: Vec<String>,
-    symbol: String,
-    line1_graph_chars: String,
-    line1_graph_chars_part2: String,
+    /// Line 1 graph gutter (graph chars + symbol), ANSI styling preserved.
+    line1_gutter_ansi: String,
+    /// Line 2 graph gutter, ANSI-stripped.
     line2_graph_chars: String,
-    pretty_line1: String,
-    pretty_line2: String,
+    /// Line 1 styled display portion (after the trailing marker).
+    line1_ansi: String,
+    /// Line 2 styled display portion (the description).
+    line2_ansi: String,
+    /// Indent prefix for child rows so they line up under this commit's gutter.
     graph_indent: String,
     unfolded: bool,
     loaded: bool,
     file_diffs: Vec<FileDiff>,
-    pub flat_log_idx: usize,
+    flat_log_idx: usize,
 }
 
+/// Marker delimiting structured fields in our custom `jj log` template
+/// output. Emitted via `stringify(...)` so it never carries ANSI styling.
+pub const COMMIT_FIELD_MARKER: &str = "_JJDAG_";
+
+/// Number of structured fields between the leading and trailing markers.
+const COMMIT_NUM_FIELDS: usize = 10;
+
 impl Commit {
-    fn new(pretty_string: String) -> Result<Self> {
-        let clean_string = strip_ansi(&pretty_string);
-        let re_lines = Regex::new(r"^[ │]*\S+[ │]*(.*)\n[ │├┤┬┴╭╮╯╰─┼]*(.*)")?;
-
-        if clean_string.contains("root()") {
-            return Self::new_root(clean_string, pretty_string, &re_lines);
-        }
-
-        let re_fields = Regex::new(
-            r"^([ │]*)(.)([ │]*)  ([k-z]{8,}(?:/\d+)?)\s+(\S+)\s+(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})\s*(.*?)\s+([a-f0-9]{8,})\s*(\S*)\s*\n([ │├┤┬┴╭╮╯╰─┼]*)(\(empty\))?\s*(.*)",
-        )?;
-
-        let captures = re_fields
-            .captures(&clean_string)
-            .ok_or_else(|| anyhow!("Cannot parse commit fields: {:?}", clean_string))?;
-        let line1_graph_chars: String = captures[1].into();
-        let symbol: String = captures[2].into();
-        let line1_graph_chars_part2: String = captures[3].into();
-        let change_id: String = captures[4].into();
-        let email: String = captures[5].into();
-        let timestamp: String = captures[6].into();
-        let bookmarks_str: &str = &captures[7];
-        let commit_id: String = captures[8].into();
-        let conflict_status: &str = &captures[9];
-        let line2_graph_chars: String = captures[10].into();
-        let empty = captures.get(11).is_some();
-        let description_string: &str = &captures[12];
-
-        let bookmarks: Vec<String> = bookmarks_str
-            .split_whitespace()
-            .map(|s| s.to_string())
-            .collect();
-
-        let current_working_copy = symbol == "@";
-        let has_conflict = conflict_status == "(conflict)";
-        let description_first_line = if description_string == "(no description set)" {
-            None
-        } else {
-            Some(description_string.to_string())
-        };
-
-        let captures = re_lines
-            .captures(&pretty_string)
-            .ok_or_else(|| anyhow!("Cannot parse commit lines: {:?}", pretty_string))?;
-        let pretty_line1: String = captures[1].into();
-        let pretty_line2: String = captures[2].into();
-
-        let mut graph_indent: String = line2_graph_chars
-            .chars()
-            .map(|c| match c {
-                '│' | '├' | '┤' | '┬' | '╭' | '╮' | '┼' => '│',
-                _ => ' ',
-            })
-            .collect();
-        graph_indent.pop();
-
-        Ok(Commit {
+    fn new(line1: String, line2: Option<String>) -> Result<Self> {
+        let (line1_gutter_ansi, fields, line1_ansi) = split_line1(&line1)?;
+        let [
             change_id,
             commit_id,
             current_working_copy,
             has_conflict,
-            _empty: empty,
-            description_first_line,
-            _email: email,
-            _timestamp: timestamp,
+            empty,
+            is_root,
             bookmarks,
-            symbol,
-            line1_graph_chars,
-            line1_graph_chars_part2,
-            line2_graph_chars,
-            pretty_line1,
-            pretty_line2,
-            graph_indent,
-            unfolded: false,
-            loaded: false,
-            file_diffs: Vec::new(),
-            flat_log_idx: 0,
-        })
-    }
+            email,
+            timestamp,
+            description,
+        ] = fields;
 
-    fn new_root(clean_string: String, pretty_string: String, re_lines: &Regex) -> Result<Self> {
-        let re_root = Regex::new(
-            r"^([ │]*)(.)([ │]*)  ([k-z]{8,}(?:/\d+)?)\s+.*\s+([a-f0-9]{8,})\s*\n([ │├┤┬┴╭╮╯╰─┼]*)(.*)",
-        )?;
-
-        let captures = re_root
-            .captures(&clean_string)
-            .ok_or_else(|| anyhow!("Cannot parse root commit: {:?}", clean_string))?;
-        let line1_graph_chars: String = captures[1].into();
-        let symbol: String = captures[2].into();
-        let line1_graph_chars_part2: String = captures[3].into();
-        let change_id: String = captures[4].into();
-        let commit_id: String = captures[5].into();
-        let line2_graph_chars: String = captures[6].into();
-
-        let captures = re_lines
-            .captures(&pretty_string)
-            .ok_or_else(|| anyhow!("Cannot parse root commit lines: {:?}", pretty_string))?;
-        let pretty_line1: String = captures[1].into();
-        let pretty_line2: String = captures[2].into();
-
-        let mut graph_indent: String = line2_graph_chars
-            .chars()
-            .map(|c| match c {
-                '│' | '├' | '┤' | '┬' | '╭' | '╮' | '┼' => '│',
-                _ => ' ',
-            })
-            .collect();
-        graph_indent.pop();
+        // Line 2 is optional (the root commit is single-line).
+        let (line2_graph_chars, line2_ansi) =
+            line2.as_deref().map(split_line2_gutter).unwrap_or_default();
+        let graph_indent = derive_graph_indent(&strip_ansi(&line1_gutter_ansi), &line2_graph_chars);
 
         Ok(Commit {
             change_id,
             commit_id,
-            current_working_copy: false,
-            has_conflict: false,
-            _empty: false,
-            description_first_line: None,
-            _email: String::new(),
-            _timestamp: String::new(),
-            bookmarks: Vec::new(),
-            symbol,
-            line1_graph_chars,
-            line1_graph_chars_part2,
+            current_working_copy: current_working_copy == "Y",
+            _has_conflict: has_conflict == "Y",
+            _empty: empty == "Y",
+            _is_root: is_root == "Y",
+            description_first_line: Some(description).filter(|s| !s.is_empty()),
+            _email: email,
+            _timestamp: timestamp,
+            bookmarks: bookmarks.split_whitespace().map(str::to_string).collect(),
+            line1_gutter_ansi,
             line2_graph_chars,
-            pretty_line1,
-            pretty_line2,
+            line1_ansi,
+            line2_ansi,
             graph_indent,
             unfolded: false,
             loaded: false,
@@ -366,35 +282,90 @@ impl Commit {
     }
 }
 
+/// Slice line 1 into `(gutter_ansi, [field; N], line1_ansi)` using the
+/// `COMMIT_FIELD_MARKER` markers. The gutter strips jj's standard `  `
+/// separator but keeps any extra alignment padding.
+fn split_line1(line1: &str) -> Result<(String, [String; COMMIT_NUM_FIELDS], String)> {
+    let first_marker = line1.find(COMMIT_FIELD_MARKER).ok_or_else(|| {
+        anyhow!("Commit line 1 missing leading {COMMIT_FIELD_MARKER} marker: {line1:?}")
+    })?;
+    let last_marker = line1.rfind(COMMIT_FIELD_MARKER).ok_or_else(|| {
+        anyhow!("Commit line 1 missing trailing {COMMIT_FIELD_MARKER} marker: {line1:?}")
+    })?;
+    if first_marker == last_marker {
+        bail!("Commit line 1 has only one {COMMIT_FIELD_MARKER} marker: {line1:?}");
+    }
+
+    let raw_gutter = &line1[..first_marker];
+    let gutter_ansi = raw_gutter
+        .strip_suffix("  ")
+        .unwrap_or(raw_gutter)
+        .to_string();
+    let marker_block_ansi = &line1[first_marker..last_marker + COMMIT_FIELD_MARKER.len()];
+    let line1_ansi = line1[last_marker + COMMIT_FIELD_MARKER.len()..].to_string();
+
+    // Split yields `["", f1, ..., fN, ""]`; trim the empty bookends.
+    let marker_block_clean = strip_ansi(marker_block_ansi);
+    let parts: Vec<&str> = marker_block_clean.split(COMMIT_FIELD_MARKER).collect();
+    let fields: [&str; COMMIT_NUM_FIELDS] = parts
+        .get(1..=COMMIT_NUM_FIELDS)
+        .filter(|_| parts.len() == COMMIT_NUM_FIELDS + 2)
+        .and_then(|fs| fs.try_into().ok())
+        .ok_or_else(|| {
+            anyhow!(
+                "Commit marker block has {} fields, expected {}: {marker_block_clean:?}",
+                parts.len().saturating_sub(2),
+                COMMIT_NUM_FIELDS,
+            )
+        })?;
+    let fields = fields.map(str::to_string);
+
+    Ok((gutter_ansi, fields, line1_ansi))
+}
+
+/// Build a child-row indent prefix. Vertical connectors in line 2 are
+/// surviving branches; a `─` sweep over a line 1 `│` also keeps that branch.
+/// The trailing space jj puts before line 2's content is dropped.
+fn derive_graph_indent(line1_clean: &str, line2_graph_chars: &str) -> String {
+    let line2 = line2_graph_chars.chars();
+    let line2_trimmed = line2.clone().take(line2.count().saturating_sub(1));
+    let line1 = line1_clean.chars().chain(std::iter::repeat(' '));
+    line2_trimmed
+        .zip(line1)
+        .map(|(c2, c1)| match (c2, c1) {
+            ('│' | '├' | '┤' | '┬' | '╭' | '╮' | '┼', _) | ('─', '│') => '│',
+            _ => ' ',
+        })
+        .collect()
+}
+
+/// Split a line 2 ANSI string into its leading graph gutter and the styled
+/// description. Gutter chars never carry ANSI styling.
+fn split_line2_gutter(line2_ansi: &str) -> (String, String) {
+    let re = Regex::new(r"^([ │├┤┬┴╭╮╯╰─┼]*)(.*)").unwrap();
+    let caps = re.captures(line2_ansi).unwrap();
+    (caps[1].to_string(), caps[2].to_string())
+}
+
 impl LogTreeNode for Commit {
     fn render(&self) -> Result<Text<'static>> {
-        let mut line1 = Line::from(vec![
-            Span::raw(self.line1_graph_chars.clone()),
-            Span::styled(
-                self.symbol.clone(),
-                if self.has_conflict {
-                    Style::default().fg(Color::Red)
-                } else if self.current_working_copy {
-                    Style::default()
-                        .fg(Color::Green)
-                        .add_modifier(Modifier::BOLD)
-                } else {
-                    Style::default().fg(Color::LightCyan)
-                },
-            ),
-            Span::raw(self.line1_graph_chars_part2.clone()),
-            Span::raw(" "),
-            fold_symbol(self.unfolded),
-            Span::raw(" "),
-        ]);
-        line1.extend(self.pretty_line1.into_text()?.lines[0].spans.clone());
+        // Render the gutter from jj's ANSI output to keep its symbol coloring.
+        let gutter_text = self.line1_gutter_ansi.into_text()?;
+        let mut line1 = Line::from(Vec::new());
+        if let Some(gutter_line) = gutter_text.lines.into_iter().next() {
+            line1.spans.extend(gutter_line.spans);
+        }
+        line1
+            .spans
+            .extend([Span::raw(" "), fold_symbol(self.unfolded), Span::raw(" ")]);
+        line1.extend(self.line1_ansi.into_text()?.lines[0].spans.clone());
         let mut lines = vec![line1];
-        if !self.pretty_line2.is_empty() {
+        if !self.line2_ansi.is_empty() {
             let mut line2 = Line::from(vec![
                 Span::raw(self.line2_graph_chars.clone()),
                 Span::raw(" "),
             ]);
-            line2.extend(self.pretty_line2.into_text()?.lines[0].spans.clone());
+            line2.extend(self.line2_ansi.into_text()?.lines[0].spans.clone());
             lines.push(line2);
         };
         Ok(Text::from(lines))
@@ -452,14 +423,14 @@ impl LogTreeNode for Commit {
 
 #[derive(Debug)]
 pub struct InfoText {
-    pretty_string: String,
+    ansi_string: String,
     flat_log_idx: usize,
 }
 
 impl InfoText {
-    fn new(pretty_string: String) -> Self {
+    fn new(ansi_string: String) -> Self {
         Self {
-            pretty_string,
+            ansi_string,
             flat_log_idx: 0,
         }
     }
@@ -467,7 +438,7 @@ impl InfoText {
 
 impl LogTreeNode for InfoText {
     fn render(&self) -> Result<Text<'static>> {
-        Ok(self.pretty_string.into_text()?)
+        Ok(self.ansi_string.into_text()?)
     }
 
     fn flatten(
@@ -509,8 +480,8 @@ pub struct FileDiff {
 }
 
 impl FileDiff {
-    fn new(change_id: String, pretty_string: String, graph_indent: String) -> Result<Self> {
-        let clean_string = strip_ansi(&pretty_string);
+    fn new(change_id: String, ansi_string: String, graph_indent: String) -> Result<Self> {
+        let clean_string = strip_ansi(&ansi_string);
         let re = Regex::new(r"^([MADRC])\s+(.+)$").unwrap();
 
         let captures = re
@@ -712,7 +683,7 @@ impl DiffHunk {
         let line_num_chars_len = max_line_num.checked_ilog10().unwrap_or(0) as usize;
         let mut diff_hunk_lines = diff_hunk_lines;
         for line in diff_hunk_lines.iter_mut() {
-            line.pretty_string = line.pretty_string.replacen(
+            line.ansi_string = line.ansi_string.replacen(
                 &" ".repeat(3_usize.saturating_sub(line_num_chars_len)),
                 "",
                 1,
@@ -743,7 +714,7 @@ impl DiffHunk {
             SearchDirection::Down => diff_hunk_lines.iter().collect(),
             SearchDirection::Up => diff_hunk_lines.iter().rev().collect(),
         };
-        for line in hunk_lines.iter().map(|l| strip_ansi(&l.pretty_string)) {
+        for line in hunk_lines.iter().map(|l| strip_ansi(&l.ansi_string)) {
             if matches!(line.trim(), "~" | "(binary)" | "(empty)") {
                 continue;
             }
@@ -900,15 +871,15 @@ impl LogTreeNode for DiffHunk {
 
 #[derive(Debug)]
 struct DiffHunkLine {
-    pretty_string: String,
+    ansi_string: String,
     graph_indent: String,
     flat_log_idx: usize,
 }
 
 impl DiffHunkLine {
-    fn new(pretty_string: String, graph_indent: String) -> Self {
+    fn new(ansi_string: String, graph_indent: String) -> Self {
         Self {
-            pretty_string,
+            ansi_string,
             graph_indent,
             flat_log_idx: 0,
         }
@@ -917,10 +888,10 @@ impl DiffHunkLine {
 
 impl LogTreeNode for DiffHunkLine {
     fn render(&self) -> Result<Text<'static>> {
-        let clean_string = strip_ansi(&self.pretty_string);
+        let clean_string = strip_ansi(&self.ansi_string);
         let mut line = Line::from(vec![Span::raw(self.graph_indent.clone()), Span::raw("  ")]);
 
-        for span in self.pretty_string.into_text()?.lines[0].spans.clone() {
+        for span in self.ansi_string.into_text()?.lines[0].spans.clone() {
             let span = if clean_string.starts_with("+") || clean_string.starts_with("-") {
                 let style = span.style.bold();
                 span.style(style)
@@ -963,7 +934,7 @@ fn fold_symbol(unfolded: bool) -> Span<'static> {
     Span::styled(symbol, Style::default().fg(Color::DarkGray))
 }
 
-fn strip_ansi(pretty_str: &str) -> String {
+fn strip_ansi(ansi_str: &str) -> String {
     let ansi_regex = Regex::new(r"\x1b\[[0-9;]*m").unwrap();
-    ansi_regex.replace_all(pretty_str, "").to_string()
+    ansi_regex.replace_all(ansi_str, "").to_string()
 }
