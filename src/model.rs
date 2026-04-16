@@ -302,6 +302,80 @@ impl Model {
         }
     }
 
+    fn get_bookmark_names(&self) -> Result<Vec<String>> {
+        let cmd = JjCommand::jj_bookmark_list_all_names(self.global_args.clone());
+        let output = cmd.run().map_err(|e| anyhow::anyhow!("{}", e))?;
+        let mut names: Vec<String> = output
+            .lines()
+            .map(|line| line.trim().to_string())
+            .filter(|s| !s.is_empty())
+            .collect();
+        names.sort();
+        names.dedup();
+        Ok(names)
+    }
+
+    fn get_tracked_remote_bookmarks(&self) -> Result<Vec<String>> {
+        let cmd = JjCommand::jj_bookmark_list_tracked_remote(self.global_args.clone());
+        let output = cmd.run().map_err(|e| anyhow::anyhow!("{}", e))?;
+        let mut names: Vec<String> = output
+            .lines()
+            .map(|line| line.trim().to_string())
+            .filter(|s| !s.is_empty())
+            .collect();
+        names.sort();
+        names.dedup();
+        Ok(names)
+    }
+
+    fn get_untracked_remote_bookmarks(&self) -> Result<Vec<String>> {
+        let cmd = JjCommand::jj_bookmark_list_untracked_remote(self.global_args.clone());
+        let output = cmd.run().map_err(|e| anyhow::anyhow!("{}", e))?;
+        let mut names: Vec<String> = output
+            .lines()
+            .map(|line| line.trim().to_string())
+            .filter(|s| !s.is_empty())
+            .collect();
+        names.sort();
+        names.dedup();
+        Ok(names)
+    }
+
+    fn get_git_remote_names(&self) -> Result<Vec<String>> {
+        let cmd = JjCommand::jj_git_remote_list(self.global_args.clone());
+        let output = cmd.run().map_err(|e| anyhow::anyhow!("{}", e))?;
+        let remotes = output
+            .lines()
+            .filter_map(|line| line.split_whitespace().next())
+            .map(|s| s.to_string())
+            .collect();
+        Ok(remotes)
+    }
+
+    fn get_revision_targets(&self) -> Result<Vec<String>> {
+        let cmd = JjCommand::jj_log_targets(&self.revset, self.global_args.clone());
+        let output = cmd.run().map_err(|e| anyhow::anyhow!("{}", e))?;
+        let mut targets: Vec<String> = output
+            .lines()
+            .map(|line| line.trim().to_string())
+            .filter(|s| !s.is_empty())
+            .collect();
+        targets.sort();
+        targets.dedup();
+        Ok(targets)
+    }
+
+    fn get_file_list(&self) -> Result<Vec<String>> {
+        let cmd = JjCommand::jj_file_list(self.global_args.clone());
+        let output = cmd.run().map_err(|e| anyhow::anyhow!("{}", e))?;
+        let names: Vec<String> = output
+            .lines()
+            .map(|line| line.trim().to_string())
+            .filter(|s| !s.is_empty())
+            .collect();
+        Ok(names)
+    }
+
     pub fn select_next_node(&mut self) {
         if self.log_list_state.selected().unwrap() < self.log_list.len() - 1 {
             self.log_list_state.select_next();
@@ -699,7 +773,8 @@ impl Model {
             return self.invalid_selection();
         };
 
-        let cmd = JjCommand::describe_with_message(change_id, &message, self.global_args.clone());
+        let cmd =
+            JjCommand::jj_describe_with_message(change_id, &message, self.global_args.clone());
         self.queue_jj_command(cmd)
     }
 
@@ -920,7 +995,7 @@ impl Model {
             return self.invalid_selection();
         };
 
-        let cmd = JjCommand::file_show(&change_id, &file_path, self.global_args.clone());
+        let cmd = JjCommand::jj_file_show(&change_id, &file_path, self.global_args.clone());
         let contents = cmd.run().map_err(|e| anyhow::anyhow!("{}", e))?;
 
         let temp_dir = tempfile::Builder::new()
@@ -949,7 +1024,7 @@ impl Model {
             AbandonMode::RetainBookmarks => Some("--retain-bookmarks"),
             AbandonMode::RestoreDescendants => Some("--restore-descendants"),
         };
-        let cmd = JjCommand::abandon(change_id, mode, self.global_args.clone());
+        let cmd = JjCommand::jj_abandon(change_id, mode, self.global_args.clone());
         self.queue_jj_command(cmd)
     }
 
@@ -976,7 +1051,7 @@ impl Model {
             }
         };
 
-        let cmd = JjCommand::absorb(
+        let cmd = JjCommand::jj_absorb(
             from_change_id,
             maybe_into_change_id,
             maybe_file_path,
@@ -989,7 +1064,8 @@ impl Model {
         let Some(change_id) = self.get_selected_change_id() else {
             return self.invalid_selection();
         };
-        let cmd = JjCommand::bookmark_create(&bookmark_names, change_id, self.global_args.clone());
+        let cmd =
+            JjCommand::jj_bookmark_create(&bookmark_names, change_id, self.global_args.clone());
         self.queue_jj_command(cmd)
     }
 
@@ -1002,7 +1078,7 @@ impl Model {
     }
 
     fn apply_bookmark_delete_from_input(&mut self, bookmark_names: String) -> Result<()> {
-        let cmd = JjCommand::bookmark_delete(&bookmark_names, self.global_args.clone());
+        let cmd = JjCommand::jj_bookmark_delete(&bookmark_names, self.global_args.clone());
         self.queue_jj_command(cmd)
     }
 
@@ -1025,8 +1101,11 @@ impl Model {
         bookmark_names: String,
         include_remotes: bool,
     ) -> Result<()> {
-        let cmd =
-            JjCommand::bookmark_forget(&bookmark_names, include_remotes, self.global_args.clone());
+        let cmd = JjCommand::jj_bookmark_forget(
+            &bookmark_names,
+            include_remotes,
+            self.global_args.clone(),
+        );
         self.queue_jj_command(cmd)
     }
 
@@ -1071,7 +1150,7 @@ impl Model {
                 ("heads(::@- & bookmarks())", to_change_id, false)
             }
         };
-        let cmd = JjCommand::bookmark_move(
+        let cmd = JjCommand::jj_bookmark_move(
             from_change_id,
             to_change_id,
             allow_backwards,
@@ -1085,7 +1164,7 @@ impl Model {
         old_bookmark_name: String,
         new_bookmark_name: String,
     ) -> Result<()> {
-        let cmd = JjCommand::bookmark_rename(
+        let cmd = JjCommand::jj_bookmark_rename(
             &old_bookmark_name,
             &new_bookmark_name,
             self.global_args.clone(),
@@ -1111,7 +1190,7 @@ impl Model {
         let Some(change_id) = self.get_selected_change_id() else {
             return self.invalid_selection();
         };
-        let cmd = JjCommand::bookmark_set(&bookmark_names, change_id, self.global_args.clone());
+        let cmd = JjCommand::jj_bookmark_set(&bookmark_names, change_id, self.global_args.clone());
         self.queue_jj_command(cmd)
     }
 
@@ -1129,7 +1208,7 @@ impl Model {
     }
 
     fn apply_bookmark_track_from_input(&mut self, bookmark_at_remote: String) -> Result<()> {
-        let cmd = JjCommand::bookmark_track(&bookmark_at_remote, self.global_args.clone());
+        let cmd = JjCommand::jj_bookmark_track(&bookmark_at_remote, self.global_args.clone());
         self.queue_jj_command(cmd)
     }
 
@@ -1144,7 +1223,7 @@ impl Model {
     }
 
     fn apply_bookmark_untrack_from_input(&mut self, bookmark_at_remote: String) -> Result<()> {
-        let cmd = JjCommand::bookmark_untrack(&bookmark_at_remote, self.global_args.clone());
+        let cmd = JjCommand::jj_bookmark_untrack(&bookmark_at_remote, self.global_args.clone());
         self.queue_jj_command(cmd)
     }
 
@@ -1164,7 +1243,7 @@ impl Model {
 
     pub fn jj_commit(&mut self, term: Term) -> Result<()> {
         let maybe_file_path = self.get_selected_file_path();
-        let cmd = JjCommand::commit(maybe_file_path, self.global_args.clone(), term);
+        let cmd = JjCommand::jj_commit(maybe_file_path, self.global_args.clone(), term);
         self.queue_jj_command(cmd)
     }
 
@@ -1172,7 +1251,7 @@ impl Model {
         let Some(change_id) = self.get_selected_change_id() else {
             return self.invalid_selection();
         };
-        let cmd = JjCommand::describe(change_id, self.global_args.clone(), term);
+        let cmd = JjCommand::jj_describe(change_id, self.global_args.clone(), term);
         self.queue_jj_command(cmd)
     }
 
@@ -1210,7 +1289,7 @@ impl Model {
             }
         };
 
-        let cmd = JjCommand::duplicate(
+        let cmd = JjCommand::jj_duplicate(
             change_id,
             destination_type,
             destination,
@@ -1223,12 +1302,12 @@ impl Model {
         let Some(change_id) = self.get_selected_change_id() else {
             return self.invalid_selection();
         };
-        let cmd = JjCommand::edit(change_id, self.global_args.clone());
+        let cmd = JjCommand::jj_edit(change_id, self.global_args.clone());
         self.queue_jj_command(cmd)
     }
 
     fn apply_edit_target_from_input(&mut self, target: String) -> Result<()> {
-        let cmd = JjCommand::edit(&target, self.global_args.clone());
+        let cmd = JjCommand::jj_edit(&target, self.global_args.clone());
         self.queue_jj_command(cmd)
     }
 
@@ -1246,12 +1325,12 @@ impl Model {
         let Some(change_id) = self.get_selected_change_id() else {
             return self.invalid_selection();
         };
-        let cmd = JjCommand::evolog(change_id, patch, self.global_args.clone(), term);
+        let cmd = JjCommand::jj_evolog(change_id, patch, self.global_args.clone(), term);
         self.queue_jj_command(cmd)
     }
 
     fn apply_file_track_from_input(&mut self, file_path: String) -> Result<()> {
-        let cmd = JjCommand::file_track(&file_path, self.global_args.clone());
+        let cmd = JjCommand::jj_file_track(&file_path, self.global_args.clone());
         self.queue_jj_command(cmd)
     }
 
@@ -1272,87 +1351,13 @@ impl Model {
         if !self.is_selected_working_copy() {
             return self.invalid_selection();
         }
-        let cmd = JjCommand::file_untrack(file_path, self.global_args.clone());
+        let cmd = JjCommand::jj_file_untrack(file_path, self.global_args.clone());
         self.queue_jj_command(cmd)
     }
 
     fn apply_git_fetch_from_input(&mut self, flag: Option<&str>, value: String) -> Result<()> {
-        let cmd = JjCommand::git_fetch(flag, Some(&value), self.global_args.clone());
+        let cmd = JjCommand::jj_git_fetch(flag, Some(&value), self.global_args.clone());
         self.queue_jj_command(cmd)
-    }
-
-    fn get_git_remote_names(&self) -> Result<Vec<String>> {
-        let cmd = JjCommand::git_remote_list(self.global_args.clone());
-        let output = cmd.run().map_err(|e| anyhow::anyhow!("{}", e))?;
-        let remotes = output
-            .lines()
-            .filter_map(|line| line.split_whitespace().next())
-            .map(|s| s.to_string())
-            .collect();
-        Ok(remotes)
-    }
-
-    fn get_revision_targets(&self) -> Result<Vec<String>> {
-        let cmd = JjCommand::log_targets(&self.revset, self.global_args.clone());
-        let output = cmd.run().map_err(|e| anyhow::anyhow!("{}", e))?;
-        let mut targets: Vec<String> = output
-            .lines()
-            .map(|line| line.trim().to_string())
-            .filter(|s| !s.is_empty())
-            .collect();
-        targets.sort();
-        targets.dedup();
-        Ok(targets)
-    }
-
-    fn get_bookmark_names(&self) -> Result<Vec<String>> {
-        let cmd = JjCommand::bookmark_list_all_names(self.global_args.clone());
-        let output = cmd.run().map_err(|e| anyhow::anyhow!("{}", e))?;
-        let mut names: Vec<String> = output
-            .lines()
-            .map(|line| line.trim().to_string())
-            .filter(|s| !s.is_empty())
-            .collect();
-        names.sort();
-        names.dedup();
-        Ok(names)
-    }
-
-    fn get_tracked_remote_bookmarks(&self) -> Result<Vec<String>> {
-        let cmd = JjCommand::bookmark_list_tracked_remote(self.global_args.clone());
-        let output = cmd.run().map_err(|e| anyhow::anyhow!("{}", e))?;
-        let mut names: Vec<String> = output
-            .lines()
-            .map(|line| line.trim().to_string())
-            .filter(|s| !s.is_empty())
-            .collect();
-        names.sort();
-        names.dedup();
-        Ok(names)
-    }
-
-    fn get_untracked_remote_bookmarks(&self) -> Result<Vec<String>> {
-        let cmd = JjCommand::bookmark_list_untracked_remote(self.global_args.clone());
-        let output = cmd.run().map_err(|e| anyhow::anyhow!("{}", e))?;
-        let mut names: Vec<String> = output
-            .lines()
-            .map(|line| line.trim().to_string())
-            .filter(|s| !s.is_empty())
-            .collect();
-        names.sort();
-        names.dedup();
-        Ok(names)
-    }
-
-    fn get_file_list(&self) -> Result<Vec<String>> {
-        let cmd = JjCommand::file_list(self.global_args.clone());
-        let output = cmd.run().map_err(|e| anyhow::anyhow!("{}", e))?;
-        let names: Vec<String> = output
-            .lines()
-            .map(|line| line.trim().to_string())
-            .filter(|s| !s.is_empty())
-            .collect();
-        Ok(names)
     }
 
     pub fn jj_git_fetch(&mut self, mode: GitFetchMode) -> Result<()> {
@@ -1379,7 +1384,7 @@ impl Model {
                 return Ok(());
             }
         };
-        let cmd = JjCommand::git_fetch(flag, value.as_deref(), self.global_args.clone());
+        let cmd = JjCommand::jj_git_fetch(flag, value.as_deref(), self.global_args.clone());
         self.queue_jj_command(cmd)
     }
 
@@ -1389,12 +1394,12 @@ impl Model {
         bookmark_name: String,
     ) -> Result<()> {
         let value = format!("{}={}", bookmark_name, change_id);
-        let cmd = JjCommand::git_push(Some("--named"), Some(&value), self.global_args.clone());
+        let cmd = JjCommand::jj_git_push(Some("--named"), Some(&value), self.global_args.clone());
         self.queue_jj_command(cmd)
     }
 
     fn apply_git_push_from_input(&mut self, flag: Option<&str>, value: String) -> Result<()> {
-        let cmd = JjCommand::git_push(flag, Some(&value), self.global_args.clone());
+        let cmd = JjCommand::jj_git_push(flag, Some(&value), self.global_args.clone());
         self.queue_jj_command(cmd)
     }
 
@@ -1443,7 +1448,7 @@ impl Model {
                 return Ok(());
             }
         };
-        let cmd = JjCommand::git_push(flag, value.as_deref(), self.global_args.clone());
+        let cmd = JjCommand::jj_git_push(flag, value.as_deref(), self.global_args.clone());
         self.queue_jj_command(cmd)
     }
 
@@ -1472,7 +1477,8 @@ impl Model {
             }
         };
 
-        let cmd = JjCommand::interdiff(from, to, maybe_file_path, self.global_args.clone(), term);
+        let cmd =
+            JjCommand::jj_interdiff(from, to, maybe_file_path, self.global_args.clone(), term);
         self.queue_jj_command(cmd)
     }
 
@@ -1482,7 +1488,7 @@ impl Model {
         flag: &str,
         value: String,
     ) -> Result<()> {
-        let cmd = JjCommand::metaedit(&change_id, flag, Some(&value), self.global_args.clone());
+        let cmd = JjCommand::jj_metaedit(&change_id, flag, Some(&value), self.global_args.clone());
         self.queue_jj_command(cmd)
     }
 
@@ -1518,7 +1524,8 @@ impl Model {
             }
         };
 
-        let cmd = JjCommand::metaedit(change_id, flag, value.as_deref(), self.global_args.clone());
+        let cmd =
+            JjCommand::jj_metaedit(change_id, flag, value.as_deref(), self.global_args.clone());
         self.queue_jj_command(cmd)
     }
 
@@ -1528,14 +1535,14 @@ impl Model {
                 let Some(change_id) = self.get_selected_change_id() else {
                     return self.invalid_selection();
                 };
-                JjCommand::new(change_id, &[], self.global_args.clone())
+                JjCommand::jj_new(change_id, &[], self.global_args.clone())
             }
-            NewMode::AfterTrunk => JjCommand::new("trunk()", &[], self.global_args.clone()),
+            NewMode::AfterTrunk => JjCommand::jj_new("trunk()", &[], self.global_args.clone()),
             NewMode::Before => {
                 let Some(change_id) = self.get_selected_change_id() else {
                     return self.invalid_selection();
                 };
-                JjCommand::new(
+                JjCommand::jj_new(
                     change_id,
                     &["--no-edit", "--insert-before"],
                     self.global_args.clone(),
@@ -1545,20 +1552,20 @@ impl Model {
                 let Some(change_id) = self.get_selected_change_id() else {
                     return self.invalid_selection();
                 };
-                JjCommand::new(change_id, &["--insert-after"], self.global_args.clone())
+                JjCommand::jj_new(change_id, &["--insert-after"], self.global_args.clone())
             }
         };
         self.queue_jj_command(cmd)
     }
 
     pub fn jj_new_after_trunk_sync(&mut self) -> Result<()> {
-        let fetch_cmd = JjCommand::git_fetch(None, None, self.global_args.clone());
-        let new_cmd = JjCommand::new("trunk()", &[], self.global_args.clone());
+        let fetch_cmd = JjCommand::jj_git_fetch(None, None, self.global_args.clone());
+        let new_cmd = JjCommand::jj_new("trunk()", &[], self.global_args.clone());
         self.queue_jj_commands(vec![fetch_cmd, new_cmd])
     }
 
     fn apply_new_at_target_from_input(&mut self, target: String) -> Result<()> {
-        let cmd = JjCommand::new(&target, &[], self.global_args.clone());
+        let cmd = JjCommand::jj_new(&target, &[], self.global_args.clone());
         self.queue_jj_command(cmd)
     }
 
@@ -1589,7 +1596,7 @@ impl Model {
             NextPrevDirection::Next => "next",
             NextPrevDirection::Prev => "prev",
         };
-        let cmd = JjCommand::next_prev(direction, mode, Some(&offset), self.global_args.clone());
+        let cmd = JjCommand::jj_next_prev(direction, mode, Some(&offset), self.global_args.clone());
         self.queue_jj_command(cmd)
     }
 
@@ -1619,12 +1626,12 @@ impl Model {
             NextPrevDirection::Next => "next",
             NextPrevDirection::Prev => "prev",
         };
-        let cmd = JjCommand::next_prev(direction, mode, None, self.global_args.clone());
+        let cmd = JjCommand::jj_next_prev(direction, mode, None, self.global_args.clone());
         self.queue_jj_command(cmd)
     }
 
     fn apply_parallelize_from_input(&mut self, revset: String) -> Result<()> {
-        let cmd = JjCommand::parallelize(&revset, self.global_args.clone());
+        let cmd = JjCommand::jj_parallelize(&revset, self.global_args.clone());
         self.queue_jj_command(cmd)
     }
 
@@ -1650,7 +1657,7 @@ impl Model {
                 format!("{}-::{}", change_id, change_id)
             }
         };
-        let cmd = JjCommand::parallelize(&revset, self.global_args.clone());
+        let cmd = JjCommand::jj_parallelize(&revset, self.global_args.clone());
         self.queue_jj_command(cmd)
     }
 
@@ -1684,7 +1691,7 @@ impl Model {
             RebaseDestination::Current => "@",
         };
 
-        let cmd = JjCommand::rebase(
+        let cmd = JjCommand::jj_rebase(
             source_type,
             source_change_id,
             destination_type,
@@ -1699,7 +1706,7 @@ impl Model {
             return self.invalid_selection();
         };
 
-        let cmd = JjCommand::rebase(
+        let cmd = JjCommand::jj_rebase(
             "--branch",
             source_change_id,
             "--onto",
@@ -1714,8 +1721,8 @@ impl Model {
             return self.invalid_selection();
         };
 
-        let fetch_cmd = JjCommand::git_fetch(None, None, self.global_args.clone());
-        let rebase_cmd = JjCommand::rebase(
+        let fetch_cmd = JjCommand::jj_git_fetch(None, None, self.global_args.clone());
+        let rebase_cmd = JjCommand::jj_rebase(
             "--branch",
             source_change_id,
             "--onto",
@@ -1726,7 +1733,7 @@ impl Model {
     }
 
     pub fn jj_redo(&mut self) -> Result<()> {
-        let cmd = JjCommand::redo(self.global_args.clone());
+        let cmd = JjCommand::jj_redo(self.global_args.clone());
         self.queue_jj_command(cmd)
     }
 
@@ -1735,7 +1742,7 @@ impl Model {
             return self.invalid_selection();
         };
         let maybe_file_path = self.get_selected_file_path();
-        let cmd = JjCommand::resolve(change_id, maybe_file_path, self.global_args.clone(), term);
+        let cmd = JjCommand::jj_resolve(change_id, maybe_file_path, self.global_args.clone(), term);
         self.queue_jj_command(cmd)
     }
 
@@ -1785,7 +1792,7 @@ impl Model {
             }
         };
 
-        let cmd = JjCommand::restore(&flags, maybe_file_path, self.global_args.clone());
+        let cmd = JjCommand::jj_restore(&flags, maybe_file_path, self.global_args.clone());
         self.queue_jj_command(cmd)
     }
 
@@ -1824,7 +1831,7 @@ impl Model {
             }
         };
 
-        let cmd = JjCommand::revert(
+        let cmd = JjCommand::jj_revert(
             revision,
             destination_type,
             destination,
@@ -1853,7 +1860,7 @@ impl Model {
             SignAction::Sign => "sign",
             SignAction::Unsign => "unsign",
         };
-        let cmd = JjCommand::sign(action, &revset, self.global_args.clone());
+        let cmd = JjCommand::jj_sign(action, &revset, self.global_args.clone());
         self.queue_jj_command(cmd)
     }
 
@@ -1865,7 +1872,7 @@ impl Model {
             SimplifyParentsMode::Revisions => "-r",
             SimplifyParentsMode::Source => "-s",
         };
-        let cmd = JjCommand::simplify_parents(change_id, mode, self.global_args.clone());
+        let cmd = JjCommand::jj_simplify_parents(change_id, mode, self.global_args.clone());
         self.queue_jj_command(cmd)
     }
 
@@ -1879,13 +1886,13 @@ impl Model {
                 let maybe_file_path = self.get_selected_file_path();
 
                 if commit.description_first_line.is_none() {
-                    JjCommand::squash_noninteractive(
+                    JjCommand::jj_squash_noninteractive(
                         &commit.change_id,
                         maybe_file_path,
                         self.global_args.clone(),
                     )
                 } else {
-                    JjCommand::squash_interactive(
+                    JjCommand::jj_squash_interactive(
                         &commit.change_id,
                         maybe_file_path,
                         self.global_args.clone(),
@@ -1901,7 +1908,7 @@ impl Model {
                 let Some(into_change_id) = self.get_selected_change_id() else {
                     return self.invalid_selection();
                 };
-                JjCommand::squash_into_interactive(
+                JjCommand::jj_squash_into_interactive(
                     from_change_id,
                     into_change_id,
                     maybe_file_path,
@@ -1915,12 +1922,12 @@ impl Model {
     }
 
     pub fn jj_status(&mut self, term: Term) -> Result<()> {
-        let cmd = JjCommand::status(self.global_args.clone(), term);
+        let cmd = JjCommand::jj_status(self.global_args.clone(), term);
         self.queue_jj_command(cmd)
     }
 
     pub fn jj_undo(&mut self) -> Result<()> {
-        let cmd = JjCommand::undo(self.global_args.clone());
+        let cmd = JjCommand::jj_undo(self.global_args.clone());
         self.queue_jj_command(cmd)
     }
 
@@ -1931,13 +1938,13 @@ impl Model {
                     return self.invalid_selection();
                 };
                 match self.get_selected_file_path() {
-                    Some(file_path) => JjCommand::diff_file_interactive(
+                    Some(file_path) => JjCommand::jj_diff_file_interactive(
                         change_id,
                         file_path,
                         self.global_args.clone(),
                         term,
                     ),
-                    None => JjCommand::show(change_id, self.global_args.clone(), term),
+                    None => JjCommand::jj_show(change_id, self.global_args.clone(), term),
                 }
             }
             ViewMode::FromSelection => {
@@ -1945,7 +1952,7 @@ impl Model {
                     return self.invalid_selection();
                 };
                 let file = self.get_selected_file_path();
-                JjCommand::diff_from_to_interactive(
+                JjCommand::jj_diff_from_to_interactive(
                     from_change_id,
                     "@",
                     file,
@@ -1961,7 +1968,7 @@ impl Model {
                     return self.invalid_selection();
                 };
                 let file = self.get_selected_file_path();
-                JjCommand::diff_from_to_interactive(
+                JjCommand::jj_diff_from_to_interactive(
                     from_change_id,
                     to_change_id,
                     file,
@@ -1974,7 +1981,7 @@ impl Model {
                     return self.invalid_selection();
                 };
                 let file = self.get_selected_file_path();
-                JjCommand::diff_from_to_interactive(
+                JjCommand::jj_diff_from_to_interactive(
                     "trunk()",
                     to_change_id,
                     file,
@@ -1987,7 +1994,7 @@ impl Model {
                     return self.invalid_selection();
                 };
                 let file = self.get_selected_file_path();
-                JjCommand::diff_from_to_interactive(
+                JjCommand::jj_diff_from_to_interactive(
                     "@",
                     to_change_id,
                     file,
@@ -2043,7 +2050,7 @@ impl Model {
                     let final_output = self.accumulated_command_output.clone();
                     self.clear();
                     self.info_list = Some(Text::from(final_output));
-                    if cmd.sync() {
+                    if cmd.sync {
                         self.sync()?;
                     }
                 } else {

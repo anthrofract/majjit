@@ -39,7 +39,7 @@ fn main() {
 
 fn run() -> Result<()> {
     let args = Args::parse();
-    let repository = JjCommand::ensure_valid_repo(&args.repository)?;
+    let repository = JjCommand::jj_ensure_valid_repo(&args.repository)?;
     let model = Model::new(repository, args.revisions)?;
 
     let terminal = terminal::init_terminal()?;

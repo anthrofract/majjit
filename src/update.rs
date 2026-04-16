@@ -62,16 +62,14 @@ pub enum Message {
     New {
         mode: NewMode,
     },
-    Open,
-    NewAtTarget,
     NewAfterTrunkSync,
-    RebaseSelectedBranchOntoTrunk,
-    RebaseSelectedBranchOntoTrunkSync,
+    NewAtTarget,
     NextPrev {
         direction: NextPrevDirection,
         mode: NextPrevMode,
         offset: bool,
     },
+    Open,
     Parallelize {
         source: ParallelizeSource,
     },
@@ -81,6 +79,8 @@ pub enum Message {
         destination_type: RebaseDestinationType,
         destination: RebaseDestination,
     },
+    RebaseSelectedBranchOntoTrunk,
+    RebaseSelectedBranchOntoTrunkSync,
     Redo,
     Refresh,
     Resolve,
@@ -108,7 +108,6 @@ pub enum Message {
     SelectParentNode,
     SelectPrevNode,
     SelectPrevSiblingNode,
-    SubmitTextInput,
     SetRevset,
     ShowHelp,
     Sign {
@@ -122,6 +121,7 @@ pub enum Message {
         mode: SquashMode,
     },
     Status,
+    SubmitTextInput,
     ToggleIgnoreImmutable,
     ToggleLogListFold,
     Undo,
@@ -166,19 +166,19 @@ pub enum DuplicateDestinationType {
 
 #[derive(Debug, PartialEq, Clone, Copy)]
 pub enum GitFetchMode {
-    Default,
     AllRemotes,
     Branch,
+    Default,
     Remote,
     Tracked,
 }
 
 #[derive(Debug, PartialEq, Clone, Copy)]
 pub enum GitPushMode {
-    Default,
     All,
     Bookmark,
     Change,
+    Default,
     Deleted,
     Named,
     Revision,
@@ -468,24 +468,24 @@ fn handle_msg(term: Term, model: &mut Model, msg: Message) -> Result<Option<Mess
         Message::Interdiff { mode } => model.jj_interdiff(mode, term)?,
         Message::Metaedit { action } => model.jj_metaedit(action)?,
         Message::New { mode } => model.jj_new(mode)?,
-        Message::NewAtTarget => model.jj_new_at_target()?,
-        Message::Open => model.open_file(term)?,
         Message::NewAfterTrunkSync => model.jj_new_after_trunk_sync()?,
-        Message::RebaseSelectedBranchOntoTrunk => model.jj_rebase_selected_branch_onto_trunk()?,
-        Message::RebaseSelectedBranchOntoTrunkSync => {
-            model.jj_rebase_selected_branch_onto_trunk_sync()?
-        }
+        Message::NewAtTarget => model.jj_new_at_target()?,
         Message::NextPrev {
             direction,
             mode,
             offset,
         } => model.jj_next_prev(direction, mode, offset)?,
+        Message::Open => model.open_file(term)?,
         Message::Parallelize { source } => model.jj_parallelize(source)?,
         Message::Rebase {
             source_type,
             destination_type,
             destination,
         } => model.jj_rebase(source_type, destination_type, destination)?,
+        Message::RebaseSelectedBranchOntoTrunk => model.jj_rebase_selected_branch_onto_trunk()?,
+        Message::RebaseSelectedBranchOntoTrunkSync => {
+            model.jj_rebase_selected_branch_onto_trunk_sync()?
+        }
         Message::Redo => model.jj_redo()?,
         Message::Resolve => model.jj_resolve(term)?,
         Message::Restore { mode } => model.jj_restore(mode)?,

@@ -159,7 +159,7 @@ pub enum CommitOrText {
 
 impl CommitOrText {
     fn load_all(global_args: &GlobalArgs, revset: &str) -> Result<Vec<Self>> {
-        let output = JjCommand::log(revset, global_args.clone()).run()?;
+        let output = JjCommand::jj_log(revset, global_args.clone()).run()?;
         let mut lines = output.trim().lines();
         let re = Regex::new(r"^.+([k-z]{8}(?:/\d+)?)\s+.*\s+([a-f0-9]{8}).*$")?;
 
@@ -569,7 +569,7 @@ impl FileDiff {
         change_id: &str,
         graph_indent: &str,
     ) -> Result<Vec<Self>> {
-        let output = JjCommand::diff_summary(change_id, global_args.clone()).run()?;
+        let output = JjCommand::jj_diff_summary(change_id, global_args.clone()).run()?;
         let lines: Vec<&str> = output.trim().lines().collect();
 
         let mut file_diffs = Vec::new();
@@ -784,7 +784,7 @@ impl DiffHunk {
         file: &str,
         graph_indent: &str,
     ) -> Result<Vec<Self>> {
-        let output = JjCommand::diff_file(change_id, file, global_args.clone()).run()?;
+        let output = JjCommand::jj_diff_file(change_id, file, global_args.clone()).run()?;
         let output_lines: Vec<&str> = output.trim().lines().skip(1).collect();
 
         let separator_regex = Regex::new(r"^\s*\.\.\.\s*$")?;
