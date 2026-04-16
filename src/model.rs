@@ -108,6 +108,10 @@ pub enum TextInputAction {
         mode: NextPrevMode,
     },
     ParallelizeRevset,
+    RebaseTarget {
+        source_type: RebaseSourceType,
+        destination_type: RebaseDestinationType,
+    },
     SelectInRevset,
 }
 
@@ -396,14 +400,18 @@ impl Model {
         }
     }
 
-    pub fn select_in_revset(&mut self) {
+    fn log_revset_candidates(&self, with_log_idx_targets: bool) -> Vec<FuzzyCandidate> {
         let mut candidates: Vec<FuzzyCandidate> = Vec::new();
 
         for item in &self.jj_log.log_tree {
             let crate::log_tree::CommitOrText::Commit(commit) = item else {
                 continue;
             };
-            let target = Some(commit.flat_log_idx.to_string());
+            let target = if with_log_idx_targets {
+                Some(commit.flat_log_idx.to_string())
+            } else {
+                None
+            };
 
             candidates.push(FuzzyCandidate {
                 display: commit.change_id.clone(),
@@ -413,6 +421,49 @@ impl Model {
                 display: commit.commit_id.clone(),
                 target: target.clone(),
             });
+            for bookmark in &commit.bookmarks {
+                candidates.push(FuzzyCandidate {
+                    display: bookmark.clone(),
+                    target: target.clone(),
+                });
+            }
+        }
+
+        candidates
+    }
+
+    pub fn select_in_revset(&mut self) {
+        let candidates = self.log_revset_candidates(true);
+        self.start_fuzzy_input("Select", candidates, TextInputAction::SelectInRevset);
+    }
+
+    pub fn select_by_description(&mut self) {
+        let mut candidates: Vec<FuzzyCandidate> = Vec::new();
+
+        for item in &self.jj_log.log_tree {
+            let crate::log_tree::CommitOrText::Commit(commit) = item else {
+                continue;
+            };
+            let Some(description) = &commit.description_first_line else {
+                continue;
+            };
+            candidates.push(FuzzyCandidate {
+                display: description.clone(),
+                target: Some(commit.flat_log_idx.to_string()),
+            });
+        }
+
+        self.start_fuzzy_input("Select", candidates, TextInputAction::SelectInRevset);
+    }
+
+    pub fn select_by_bookmark(&mut self) {
+        let mut candidates: Vec<FuzzyCandidate> = Vec::new();
+
+        for item in &self.jj_log.log_tree {
+            let crate::log_tree::CommitOrText::Commit(commit) = item else {
+                continue;
+            };
+            let target = Some(commit.flat_log_idx.to_string());
             for bookmark in &commit.bookmarks {
                 candidates.push(FuzzyCandidate {
                     display: bookmark.clone(),
@@ -568,28 +619,36 @@ impl Model {
             return Ok(None);
         };
 
-        if let Some(fuzzy) = &session.fuzzy {
-            if fuzzy.filtered.is_empty() {
-                self.cancelled()?;
-                return Ok(None);
+        let maybe_value = match &session.fuzzy {
+            Some(fuzzy) => {
+                if fuzzy.filtered.is_empty() {
+                    self.cancelled()?;
+                    None
+                } else {
+                    let selected = &fuzzy.filtered[fuzzy.selected];
+                    let candidate = &fuzzy.candidates[selected.candidate_index];
+                    Some(
+                        candidate
+                            .target
+                            .clone()
+                            .unwrap_or_else(|| candidate.display.clone()),
+                    )
+                }
             }
-            let selected = &fuzzy.filtered[fuzzy.selected];
-            let candidate = &fuzzy.candidates[selected.candidate_index];
-            let value = candidate
-                .target
-                .clone()
-                .unwrap_or_else(|| candidate.display.clone());
+            None => {
+                let value = session.textarea.lines()[0].trim().to_string();
+                if value.is_empty() {
+                    self.cancelled()?;
+                    None
+                } else {
+                    Some(value)
+                }
+            }
+        };
+
+        if let Some(value) = maybe_value {
             self.apply_text_input(session.action, value)?;
-            return Ok(None);
         }
-
-        let value = session.textarea.lines()[0].trim().to_string();
-        if value.is_empty() {
-            self.cancelled()?;
-            return Ok(None);
-        }
-
-        self.apply_text_input(session.action, value)?;
         Ok(None)
     }
 
@@ -852,6 +911,10 @@ impl Model {
                 self.apply_next_prev_from_input(direction, mode, value)
             }
             TextInputAction::ParallelizeRevset => self.apply_parallelize_from_input(value),
+            TextInputAction::RebaseTarget {
+                source_type,
+                destination_type,
+            } => self.apply_rebase_target_from_input(source_type, destination_type, value),
             TextInputAction::SelectInRevset => {
                 if let Ok(idx) = value.parse::<usize>() {
                     self.log_select(idx);
@@ -1726,6 +1789,52 @@ impl Model {
             source_change_id,
             destination_type,
             destination,
+            self.global_args.clone(),
+        );
+        self.queue_jj_command(cmd)
+    }
+
+    pub fn jj_rebase_target_fuzzy(
+        &mut self,
+        source_type: RebaseSourceType,
+        destination_type: RebaseDestinationType,
+    ) -> Result<()> {
+        let candidates = self.log_revset_candidates(false);
+        self.start_fuzzy_input(
+            "Rebase target",
+            candidates,
+            TextInputAction::RebaseTarget {
+                source_type,
+                destination_type,
+            },
+        );
+        Ok(())
+    }
+
+    fn apply_rebase_target_from_input(
+        &mut self,
+        source_type: RebaseSourceType,
+        destination_type: RebaseDestinationType,
+        destination: String,
+    ) -> Result<()> {
+        let Some(source_change_id) = self.get_saved_change_id() else {
+            return self.invalid_selection();
+        };
+        let source_type = match source_type {
+            RebaseSourceType::Branch => "--branch",
+            RebaseSourceType::Source => "--source",
+            RebaseSourceType::Revisions => "--revisions",
+        };
+        let destination_type = match destination_type {
+            RebaseDestinationType::InsertAfter => "--insert-after",
+            RebaseDestinationType::InsertBefore => "--insert-before",
+            RebaseDestinationType::Onto => "--onto",
+        };
+        let cmd = JjCommand::jj_rebase(
+            source_type,
+            source_change_id,
+            destination_type,
+            &destination,
             self.global_args.clone(),
         );
         self.queue_jj_command(cmd)

@@ -145,7 +145,6 @@ impl CommandTree {
             ("h/← ", "Prev sibling"),
             ("K", "Select parent"),
             ("@", "Select @ change"),
-            ("/", "Select in revset"),
         ]
         .iter()
         .map(|(key, help)| (key.to_string(), help.to_string()))
@@ -385,6 +384,30 @@ impl CommandTree {
                 }),
             ),
             (
+                "Commands",
+                "Select",
+                vec![KeyCode::Char('/')],
+                CommandTreeNode::new_children(),
+            ),
+            (
+                "Select",
+                "Target",
+                vec![KeyCode::Char('/'), KeyCode::Char('/')],
+                CommandTreeNode::new_action(Message::SelectInRevset),
+            ),
+            (
+                "Select",
+                "Bookmark",
+                vec![KeyCode::Char('/'), KeyCode::Char('b')],
+                CommandTreeNode::new_action(Message::SelectByBookmark),
+            ),
+            (
+                "Select",
+                "Description",
+                vec![KeyCode::Char('/'), KeyCode::Char('d')],
+                CommandTreeNode::new_action(Message::SelectByDescription),
+            ),
+            (
                 "Duplicate",
                 "Selection onto destination",
                 vec![KeyCode::Char('D'), KeyCode::Char('o')],
@@ -443,8 +466,8 @@ impl CommandTree {
             ),
             (
                 "Edit",
-                "Entered revision/bookmark",
-                vec![KeyCode::Char('e'), KeyCode::Char('E')],
+                "Target",
+                vec![KeyCode::Char('e'), KeyCode::Char('/')],
                 CommandTreeNode::new_action(Message::EditTarget),
             ),
             (
@@ -741,8 +764,8 @@ impl CommandTree {
             ),
             (
                 "New",
-                "After entered revision/bookmark",
-                vec![KeyCode::Char('n'), KeyCode::Char('N')],
+                "After target",
+                vec![KeyCode::Char('n'), KeyCode::Char('/')],
                 CommandTreeNode::new_action(Message::NewAtTarget),
             ),
             (
@@ -1155,6 +1178,20 @@ impl CommandTree {
                 }),
             ),
             (
+                "Rebase branch after",
+                "Target",
+                vec![
+                    KeyCode::Char('r'),
+                    KeyCode::Char('b'),
+                    KeyCode::Char('a'),
+                    KeyCode::Char('/'),
+                ],
+                CommandTreeNode::new_action(Message::RebaseTargetFuzzy {
+                    source_type: RebaseSourceType::Branch,
+                    destination_type: RebaseDestinationType::InsertAfter,
+                }),
+            ),
+            (
                 "Rebase branch before",
                 "Select destination",
                 vec![
@@ -1200,6 +1237,20 @@ impl CommandTree {
                 }),
             ),
             (
+                "Rebase branch before",
+                "Target",
+                vec![
+                    KeyCode::Char('r'),
+                    KeyCode::Char('b'),
+                    KeyCode::Char('b'),
+                    KeyCode::Char('/'),
+                ],
+                CommandTreeNode::new_action(Message::RebaseTargetFuzzy {
+                    source_type: RebaseSourceType::Branch,
+                    destination_type: RebaseDestinationType::InsertBefore,
+                }),
+            ),
+            (
                 "Rebase branch onto",
                 "Select destination",
                 vec![
@@ -1242,6 +1293,20 @@ impl CommandTree {
                     source_type: RebaseSourceType::Branch,
                     destination_type: RebaseDestinationType::Onto,
                     destination: RebaseDestination::Current,
+                }),
+            ),
+            (
+                "Rebase branch onto",
+                "Target",
+                vec![
+                    KeyCode::Char('r'),
+                    KeyCode::Char('b'),
+                    KeyCode::Char('o'),
+                    KeyCode::Char('/'),
+                ],
+                CommandTreeNode::new_action(Message::RebaseTargetFuzzy {
+                    source_type: RebaseSourceType::Branch,
+                    destination_type: RebaseDestinationType::Onto,
                 }),
             ),
             (
@@ -1308,6 +1373,20 @@ impl CommandTree {
                 }),
             ),
             (
+                "Rebase source after",
+                "Target",
+                vec![
+                    KeyCode::Char('r'),
+                    KeyCode::Char('s'),
+                    KeyCode::Char('a'),
+                    KeyCode::Char('/'),
+                ],
+                CommandTreeNode::new_action(Message::RebaseTargetFuzzy {
+                    source_type: RebaseSourceType::Source,
+                    destination_type: RebaseDestinationType::InsertAfter,
+                }),
+            ),
+            (
                 "Rebase source before",
                 "Select destination",
                 vec![
@@ -1353,6 +1432,20 @@ impl CommandTree {
                 }),
             ),
             (
+                "Rebase source before",
+                "Target",
+                vec![
+                    KeyCode::Char('r'),
+                    KeyCode::Char('s'),
+                    KeyCode::Char('b'),
+                    KeyCode::Char('/'),
+                ],
+                CommandTreeNode::new_action(Message::RebaseTargetFuzzy {
+                    source_type: RebaseSourceType::Source,
+                    destination_type: RebaseDestinationType::InsertBefore,
+                }),
+            ),
+            (
                 "Rebase source onto",
                 "Select destination",
                 vec![
@@ -1395,6 +1488,20 @@ impl CommandTree {
                     source_type: RebaseSourceType::Source,
                     destination_type: RebaseDestinationType::Onto,
                     destination: RebaseDestination::Current,
+                }),
+            ),
+            (
+                "Rebase source onto",
+                "Target",
+                vec![
+                    KeyCode::Char('r'),
+                    KeyCode::Char('s'),
+                    KeyCode::Char('o'),
+                    KeyCode::Char('/'),
+                ],
+                CommandTreeNode::new_action(Message::RebaseTargetFuzzy {
+                    source_type: RebaseSourceType::Source,
+                    destination_type: RebaseDestinationType::Onto,
                 }),
             ),
             (
@@ -1461,6 +1568,20 @@ impl CommandTree {
                 }),
             ),
             (
+                "Rebase revision after",
+                "Target",
+                vec![
+                    KeyCode::Char('r'),
+                    KeyCode::Char('r'),
+                    KeyCode::Char('a'),
+                    KeyCode::Char('/'),
+                ],
+                CommandTreeNode::new_action(Message::RebaseTargetFuzzy {
+                    source_type: RebaseSourceType::Revisions,
+                    destination_type: RebaseDestinationType::InsertAfter,
+                }),
+            ),
+            (
                 "Rebase revision before",
                 "Select destination",
                 vec![
@@ -1506,6 +1627,20 @@ impl CommandTree {
                 }),
             ),
             (
+                "Rebase revision before",
+                "Target",
+                vec![
+                    KeyCode::Char('r'),
+                    KeyCode::Char('r'),
+                    KeyCode::Char('b'),
+                    KeyCode::Char('/'),
+                ],
+                CommandTreeNode::new_action(Message::RebaseTargetFuzzy {
+                    source_type: RebaseSourceType::Revisions,
+                    destination_type: RebaseDestinationType::InsertBefore,
+                }),
+            ),
+            (
                 "Rebase revision onto",
                 "Select destination",
                 vec![
@@ -1548,6 +1683,20 @@ impl CommandTree {
                     source_type: RebaseSourceType::Revisions,
                     destination_type: RebaseDestinationType::Onto,
                     destination: RebaseDestination::Current,
+                }),
+            ),
+            (
+                "Rebase revision onto",
+                "Target",
+                vec![
+                    KeyCode::Char('r'),
+                    KeyCode::Char('r'),
+                    KeyCode::Char('o'),
+                    KeyCode::Char('/'),
+                ],
+                CommandTreeNode::new_action(Message::RebaseTargetFuzzy {
+                    source_type: RebaseSourceType::Revisions,
+                    destination_type: RebaseDestinationType::Onto,
                 }),
             ),
             (
@@ -1740,7 +1889,7 @@ impl CommandTree {
 
 fn render_help_text(entries: HelpEntries) -> Text<'static> {
     const COL_WIDTH: usize = 26;
-    const MAX_ENTRIES_PER_COL: usize = 14;
+    const MAX_ENTRIES_PER_COL: usize = 15;
 
     // Get lines for each column, splitting if over MAX_ENTRIES_PER_COL
     let columns: Vec<Vec<Line>> = entries

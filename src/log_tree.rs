@@ -215,7 +215,7 @@ pub struct Commit {
     _empty: bool,
     pub description_first_line: Option<String>,
     _email: String,
-    pub _timestamp: String,
+    _timestamp: String,
     pub bookmarks: Vec<String>,
     symbol: String,
     line1_graph_chars: String,

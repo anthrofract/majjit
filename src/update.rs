@@ -81,6 +81,10 @@ pub enum Message {
     },
     RebaseSelectedBranchOntoTrunk,
     RebaseSelectedBranchOntoTrunkSync,
+    RebaseTargetFuzzy {
+        source_type: RebaseSourceType,
+        destination_type: RebaseDestinationType,
+    },
     Redo,
     Refresh,
     Resolve,
@@ -101,6 +105,8 @@ pub enum Message {
     ScrollDownPage,
     ScrollUp,
     ScrollUpPage,
+    SelectByBookmark,
+    SelectByDescription,
     SelectCurrentWorkingCopy,
     SelectInRevset,
     SelectNextNode,
@@ -388,7 +394,6 @@ fn handle_key(model: &mut Model, key: event::KeyEvent) -> Option<Message> {
         KeyCode::Tab => Some(Message::ToggleLogListFold),
         KeyCode::Esc => Some(Message::Clear),
         KeyCode::Char('@') => Some(Message::SelectCurrentWorkingCopy),
-        KeyCode::Char('/') => Some(Message::SelectInRevset),
         KeyCode::Char('L') => Some(Message::SetRevset),
         KeyCode::Char('I') => Some(Message::ToggleIgnoreImmutable),
         KeyCode::Char('?') => Some(Message::ShowHelp),
@@ -426,6 +431,8 @@ fn handle_msg(term: Term, model: &mut Model, msg: Message) -> Result<Option<Mess
         // Navigation
         Message::ScrollDownPage => model.scroll_down_page(),
         Message::ScrollUpPage => model.scroll_up_page(),
+        Message::SelectByBookmark => model.select_by_bookmark(),
+        Message::SelectByDescription => model.select_by_description(),
         Message::SelectCurrentWorkingCopy => model.select_current_working_copy(),
         Message::SelectInRevset => model.select_in_revset(),
         Message::SelectNextNode => model.select_next_node(),
@@ -490,6 +497,10 @@ fn handle_msg(term: Term, model: &mut Model, msg: Message) -> Result<Option<Mess
         Message::RebaseSelectedBranchOntoTrunkSync => {
             model.jj_rebase_selected_branch_onto_trunk_sync()?
         }
+        Message::RebaseTargetFuzzy {
+            source_type,
+            destination_type,
+        } => model.jj_rebase_target_fuzzy(source_type, destination_type)?,
         Message::Redo => model.jj_redo()?,
         Message::Resolve => model.jj_resolve(term)?,
         Message::Restore { mode } => model.jj_restore(mode)?,
