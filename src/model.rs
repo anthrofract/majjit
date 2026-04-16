@@ -40,6 +40,36 @@ pub struct TextInputSession {
     pub prompt: String,
     pub textarea: TextArea<'static>,
     pub action: TextInputAction,
+    pub fuzzy: Option<FuzzyFinderState>,
+}
+
+#[derive(Debug)]
+pub struct FuzzyFinderState {
+    pub candidates: Vec<FuzzyCandidate>,
+    pub filtered: Vec<FilteredCandidate>,
+    pub selected: usize,
+}
+
+#[derive(Debug)]
+pub struct FuzzyCandidate {
+    pub display: String,
+    pub target: Option<String>,
+}
+
+impl FuzzyCandidate {
+    pub fn from_display(display: String) -> Self {
+        Self {
+            display,
+            target: None,
+        }
+    }
+}
+
+#[derive(Debug)]
+pub struct FilteredCandidate {
+    pub candidate_index: usize,
+    pub score: i64,
+    pub match_positions: Vec<usize>,
 }
 
 #[derive(Debug, Clone)]
@@ -78,6 +108,7 @@ pub enum TextInputAction {
         mode: NextPrevMode,
     },
     ParallelizeRevset,
+    SelectInRevset,
 }
 
 #[derive(Debug, Clone)]
@@ -281,6 +312,34 @@ impl Model {
         }
     }
 
+    pub fn select_in_revset(&mut self) {
+        let mut candidates: Vec<FuzzyCandidate> = Vec::new();
+
+        for item in &self.jj_log.log_tree {
+            let crate::log_tree::CommitOrText::Commit(commit) = item else {
+                continue;
+            };
+            let target = Some(commit.flat_log_idx.to_string());
+
+            candidates.push(FuzzyCandidate {
+                display: commit.change_id.clone(),
+                target: target.clone(),
+            });
+            candidates.push(FuzzyCandidate {
+                display: commit.commit_id.clone(),
+                target: target.clone(),
+            });
+            for bookmark in &commit.bookmarks {
+                candidates.push(FuzzyCandidate {
+                    display: bookmark.clone(),
+                    target: target.clone(),
+                });
+            }
+        }
+
+        self.start_fuzzy_input("Select", candidates, TextInputAction::SelectInRevset);
+    }
+
     pub fn select_parent_node(&mut self) -> Result<()> {
         let tree_pos = self.get_selected_tree_position();
         if let Some(parent_pos) = get_parent_tree_position(&tree_pos) {
@@ -415,6 +474,7 @@ impl Model {
             prompt: prompt.to_string(),
             textarea,
             action,
+            fuzzy: None,
         });
     }
 
@@ -423,6 +483,21 @@ impl Model {
         let Some(session) = self.text_input.take() else {
             return Ok(None);
         };
+
+        if let Some(fuzzy) = &session.fuzzy {
+            if fuzzy.filtered.is_empty() {
+                self.cancelled()?;
+                return Ok(None);
+            }
+            let selected = &fuzzy.filtered[fuzzy.selected];
+            let candidate = &fuzzy.candidates[selected.candidate_index];
+            let value = candidate
+                .target
+                .clone()
+                .unwrap_or_else(|| candidate.display.clone());
+            self.apply_text_input(session.action, value)?;
+            return Ok(None);
+        }
 
         let value = session.textarea.lines()[0].trim().to_string();
         if value.is_empty() {
@@ -438,6 +513,141 @@ impl Model {
         if let Some(session) = self.text_input.as_mut() {
             session.textarea.input(key);
         }
+    }
+
+    fn start_fuzzy_input(
+        &mut self,
+        prompt: &str,
+        mut candidates: Vec<FuzzyCandidate>,
+        action: TextInputAction,
+    ) {
+        if candidates.is_empty() {
+            self.start_text_input(prompt, "", action);
+            return;
+        }
+
+        candidates.sort_by(|a, b| b.display.cmp(&a.display));
+
+        let mut textarea = TextArea::new(vec![String::new()]);
+        textarea.move_cursor(CursorMove::End);
+        textarea.set_cursor_line_style(Style::default());
+
+        let filtered: Vec<FilteredCandidate> = candidates
+            .iter()
+            .enumerate()
+            .map(|(idx, _)| FilteredCandidate {
+                candidate_index: idx,
+                score: 0,
+                match_positions: Vec::new(),
+            })
+            .collect();
+        let selected = filtered.len().saturating_sub(1);
+
+        self.info_list = None;
+        self.state = State::EnteringText;
+        self.text_input = Some(TextInputSession {
+            prompt: prompt.to_string(),
+            textarea,
+            action,
+            fuzzy: Some(FuzzyFinderState {
+                candidates,
+                filtered,
+                selected,
+            }),
+        });
+    }
+
+    pub fn update_fuzzy_filter(&mut self) {
+        use fuzzy_matcher::FuzzyMatcher;
+        use fuzzy_matcher::skim::SkimMatcherV2;
+
+        let Some(session) = self.text_input.as_mut() else {
+            return;
+        };
+        let Some(fuzzy) = session.fuzzy.as_mut() else {
+            return;
+        };
+
+        let query = session.textarea.lines()[0].trim().to_string();
+        if query.is_empty() {
+            fuzzy.filtered = fuzzy
+                .candidates
+                .iter()
+                .enumerate()
+                .map(|(idx, _)| FilteredCandidate {
+                    candidate_index: idx,
+                    score: 0,
+                    match_positions: Vec::new(),
+                })
+                .collect();
+            fuzzy.selected = fuzzy.filtered.len().saturating_sub(1);
+            return;
+        }
+
+        let matcher = SkimMatcherV2::default();
+        let mut filtered: Vec<FilteredCandidate> = fuzzy
+            .candidates
+            .iter()
+            .enumerate()
+            .filter_map(|(idx, candidate)| {
+                let (score, positions) = matcher.fuzzy_indices(&candidate.display, &query)?;
+                Some(FilteredCandidate {
+                    candidate_index: idx,
+                    score,
+                    match_positions: positions,
+                })
+            })
+            .collect();
+
+        filtered.sort_by_key(|f| f.score);
+
+        fuzzy.filtered = filtered;
+        if fuzzy.filtered.is_empty() {
+            fuzzy.selected = 0;
+        } else {
+            fuzzy.selected = fuzzy.filtered.len() - 1;
+        }
+    }
+
+    pub fn move_fuzzy_selection_up(&mut self) {
+        let Some(session) = self.text_input.as_mut() else {
+            return;
+        };
+        let Some(fuzzy) = session.fuzzy.as_mut() else {
+            return;
+        };
+        if fuzzy.filtered.is_empty() {
+            return;
+        }
+        if fuzzy.selected == 0 {
+            fuzzy.selected = fuzzy.filtered.len() - 1;
+        } else {
+            fuzzy.selected -= 1;
+        }
+    }
+
+    pub fn move_fuzzy_selection_down(&mut self) {
+        let Some(session) = self.text_input.as_mut() else {
+            return;
+        };
+        let Some(fuzzy) = session.fuzzy.as_mut() else {
+            return;
+        };
+        if fuzzy.filtered.is_empty() {
+            return;
+        }
+        if fuzzy.selected >= fuzzy.filtered.len() - 1 {
+            fuzzy.selected = 0;
+        } else {
+            fuzzy.selected += 1;
+        }
+    }
+
+    pub fn has_active_fuzzy(&self) -> bool {
+        self.text_input
+            .as_ref()
+            .and_then(|s| s.fuzzy.as_ref())
+            .is_some()
     }
 
     fn apply_set_revset_from_input(&mut self, new_revset: String) -> Result<()> {
@@ -529,6 +739,12 @@ impl Model {
                 self.apply_next_prev_from_input(direction, mode, value)
             }
             TextInputAction::ParallelizeRevset => self.apply_parallelize_from_input(value),
+            TextInputAction::SelectInRevset => {
+                if let Ok(idx) = value.parse::<usize>() {
+                    self.log_select(idx);
+                }
+                Ok(())
+            }
         }
     }
 
@@ -757,7 +973,16 @@ impl Model {
     }
 
     pub fn jj_bookmark_delete(&mut self) -> Result<()> {
-        self.start_text_input("Bookmark delete", "", TextInputAction::BookmarkDelete);
+        let bookmarks = self.get_bookmark_names()?;
+        let candidates = bookmarks
+            .into_iter()
+            .map(FuzzyCandidate::from_display)
+            .collect();
+        self.start_fuzzy_input(
+            "Bookmark delete",
+            candidates,
+            TextInputAction::BookmarkDelete,
+        );
         Ok(())
     }
 
@@ -772,14 +997,14 @@ impl Model {
     }
 
     pub fn jj_bookmark_forget(&mut self, include_remotes: bool) -> Result<()> {
-        let prompt = if include_remotes {
-            "Bookmark forget remotes"
-        } else {
-            "Bookmark forget"
-        };
-        self.start_text_input(
-            prompt,
-            "",
+        let bookmarks = self.get_bookmark_names()?;
+        let candidates = bookmarks
+            .into_iter()
+            .map(FuzzyCandidate::from_display)
+            .collect();
+        self.start_fuzzy_input(
+            "Bookmark forget",
+            candidates,
             TextInputAction::BookmarkForget { include_remotes },
         );
         Ok(())
@@ -835,7 +1060,16 @@ impl Model {
     }
 
     pub fn jj_bookmark_rename(&mut self) -> Result<()> {
-        self.start_text_input("Bookmark from", "", TextInputAction::BookmarkRenameFrom);
+        let bookmarks = self.get_bookmark_names()?;
+        let candidates = bookmarks
+            .into_iter()
+            .map(FuzzyCandidate::from_display)
+            .collect();
+        self.start_fuzzy_input(
+            "Bookmark rename from",
+            candidates,
+            TextInputAction::BookmarkRenameFrom,
+        );
         Ok(())
     }
 
@@ -851,7 +1085,12 @@ impl Model {
         if self.get_selected_change_id().is_none() {
             return self.invalid_selection();
         }
-        self.start_text_input("Bookmark set", "", TextInputAction::BookmarkSet);
+        let bookmarks = self.get_bookmark_names()?;
+        let candidates = bookmarks
+            .into_iter()
+            .map(FuzzyCandidate::from_display)
+            .collect();
+        self.start_fuzzy_input("Bookmark set", candidates, TextInputAction::BookmarkSet);
         Ok(())
     }
 
@@ -861,7 +1100,12 @@ impl Model {
     }
 
     pub fn jj_bookmark_track(&mut self) -> Result<()> {
-        self.start_text_input("Bookmark track", "", TextInputAction::BookmarkTrack);
+        let bookmarks = self.get_untracked_remote_bookmarks()?;
+        let candidates = bookmarks
+            .into_iter()
+            .map(FuzzyCandidate::from_display)
+            .collect();
+        self.start_fuzzy_input("Bookmark track", candidates, TextInputAction::BookmarkTrack);
         Ok(())
     }
 
@@ -871,7 +1115,16 @@ impl Model {
     }
 
     pub fn jj_bookmark_untrack(&mut self) -> Result<()> {
-        self.start_text_input("Bookmark untrack", "", TextInputAction::BookmarkUntrack);
+        let bookmarks = self.get_tracked_remote_bookmarks()?;
+        let candidates = bookmarks
+            .into_iter()
+            .map(FuzzyCandidate::from_display)
+            .collect();
+        self.start_fuzzy_input(
+            "Bookmark untrack",
+            candidates,
+            TextInputAction::BookmarkUntrack,
+        );
         Ok(())
     }
 
@@ -946,8 +1199,12 @@ impl Model {
     }
 
     pub fn jj_edit_target(&mut self) -> Result<()> {
-        let initial_text = self.get_selected_change_id().unwrap_or("").to_string();
-        self.start_text_input("Edit target", &initial_text, TextInputAction::EditTarget);
+        let targets = self.get_revision_targets()?;
+        let candidates = targets
+            .into_iter()
+            .map(FuzzyCandidate::from_display)
+            .collect();
+        self.start_fuzzy_input("Edit", candidates, TextInputAction::EditTarget);
         Ok(())
     }
 
@@ -965,8 +1222,12 @@ impl Model {
     }
 
     pub fn jj_file_track(&mut self) -> Result<()> {
-        let initial_text = self.get_selected_file_path().unwrap_or("").to_string();
-        self.start_text_input("File track", &initial_text, TextInputAction::FileTrack);
+        let files = self.get_file_list()?;
+        let candidates = files
+            .into_iter()
+            .map(FuzzyCandidate::from_display)
+            .collect();
+        self.start_fuzzy_input("File track", candidates, TextInputAction::FileTrack);
         Ok(())
     }
 
@@ -986,17 +1247,101 @@ impl Model {
         self.queue_jj_command(cmd)
     }
 
+    fn get_git_remote_names(&self) -> Result<Vec<String>> {
+        let cmd = JjCommand::git_remote_list(self.global_args.clone());
+        let output = cmd.run().map_err(|e| anyhow::anyhow!("{}", e))?;
+        let remotes = output
+            .lines()
+            .filter_map(|line| line.split_whitespace().next())
+            .map(|s| s.to_string())
+            .collect();
+        Ok(remotes)
+    }
+
+    fn get_revision_targets(&self) -> Result<Vec<String>> {
+        let cmd = JjCommand::log_targets(&self.revset, self.global_args.clone());
+        let output = cmd.run().map_err(|e| anyhow::anyhow!("{}", e))?;
+        let mut targets: Vec<String> = output
+            .lines()
+            .map(|line| line.trim().to_string())
+            .filter(|s| !s.is_empty())
+            .collect();
+        targets.sort();
+        targets.dedup();
+        Ok(targets)
+    }
+
+    fn get_bookmark_names(&self) -> Result<Vec<String>> {
+        let cmd = JjCommand::bookmark_list_all_names(self.global_args.clone());
+        let output = cmd.run().map_err(|e| anyhow::anyhow!("{}", e))?;
+        let mut names: Vec<String> = output
+            .lines()
+            .map(|line| line.trim().to_string())
+            .filter(|s| !s.is_empty())
+            .collect();
+        names.sort();
+        names.dedup();
+        Ok(names)
+    }
+
+    fn get_tracked_remote_bookmarks(&self) -> Result<Vec<String>> {
+        let cmd = JjCommand::bookmark_list_tracked_remote(self.global_args.clone());
+        let output = cmd.run().map_err(|e| anyhow::anyhow!("{}", e))?;
+        let mut names: Vec<String> = output
+            .lines()
+            .map(|line| line.trim().to_string())
+            .filter(|s| !s.is_empty())
+            .collect();
+        names.sort();
+        names.dedup();
+        Ok(names)
+    }
+
+    fn get_untracked_remote_bookmarks(&self) -> Result<Vec<String>> {
+        let cmd = JjCommand::bookmark_list_untracked_remote(self.global_args.clone());
+        let output = cmd.run().map_err(|e| anyhow::anyhow!("{}", e))?;
+        let mut names: Vec<String> = output
+            .lines()
+            .map(|line| line.trim().to_string())
+            .filter(|s| !s.is_empty())
+            .collect();
+        names.sort();
+        names.dedup();
+        Ok(names)
+    }
+
+    fn get_file_list(&self) -> Result<Vec<String>> {
+        let cmd = JjCommand::file_list(self.global_args.clone());
+        let output = cmd.run().map_err(|e| anyhow::anyhow!("{}", e))?;
+        let names: Vec<String> = output
+            .lines()
+            .map(|line| line.trim().to_string())
+            .filter(|s| !s.is_empty())
+            .collect();
+        Ok(names)
+    }
+
     pub fn jj_git_fetch(&mut self, mode: GitFetchMode) -> Result<()> {
         let (flag, value): (Option<&str>, Option<String>) = match mode {
             GitFetchMode::Default => (None, None),
             GitFetchMode::AllRemotes => (Some("--all-remotes"), None),
             GitFetchMode::Tracked => (Some("--tracked"), None),
             GitFetchMode::Branch => {
-                self.start_text_input("Fetch branch", "", TextInputAction::GitFetchBranch);
+                let bookmarks = self.get_bookmark_names()?;
+                let candidates = bookmarks
+                    .into_iter()
+                    .map(FuzzyCandidate::from_display)
+                    .collect();
+                self.start_fuzzy_input("Fetch branch", candidates, TextInputAction::GitFetchBranch);
                 return Ok(());
             }
             GitFetchMode::Remote => {
-                self.start_text_input("Fetch remote", "", TextInputAction::GitFetchRemote);
+                let remotes = self.get_git_remote_names()?;
+                let candidates = remotes
+                    .into_iter()
+                    .map(FuzzyCandidate::from_display)
+                    .collect();
+                self.start_fuzzy_input("Fetch remote", candidates, TextInputAction::GitFetchRemote);
                 return Ok(());
             }
         };
@@ -1051,7 +1396,16 @@ impl Model {
                 return Ok(());
             }
             GitPushMode::Bookmark => {
-                self.start_text_input("Push bookmark", "", TextInputAction::GitPushBookmark);
+                let bookmarks = self.get_bookmark_names()?;
+                let candidates = bookmarks
+                    .into_iter()
+                    .map(FuzzyCandidate::from_display)
+                    .collect();
+                self.start_fuzzy_input(
+                    "Push bookmark",
+                    candidates,
+                    TextInputAction::GitPushBookmark,
+                );
                 return Ok(());
             }
         };
@@ -1175,8 +1529,12 @@ impl Model {
     }
 
     pub fn jj_new_at_target(&mut self) -> Result<()> {
-        let initial_text = self.get_selected_change_id().unwrap_or("").to_string();
-        self.start_text_input("New target", &initial_text, TextInputAction::NewAtTarget);
+        let targets = self.get_revision_targets()?;
+        let candidates = targets
+            .into_iter()
+            .map(FuzzyCandidate::from_display)
+            .collect();
+        self.start_fuzzy_input("New after", candidates, TextInputAction::NewAtTarget);
         Ok(())
     }
 

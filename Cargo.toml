@@ -8,6 +8,7 @@ ansi-to-tui = "8.0.1"
 anyhow = "1.0.101"
 clap = { version = "4.5.57", features = ["derive"] }
 crossterm = "0.29.0"
+fuzzy-matcher = "0.3.7"
 indexmap = "2.13.0"
 ratatui = "0.30.0"
 ratatui-textarea = "0.8.0"

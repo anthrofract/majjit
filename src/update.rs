@@ -102,6 +102,7 @@ pub enum Message {
     ScrollUp,
     ScrollUpPage,
     SelectCurrentWorkingCopy,
+    SelectInRevset,
     SelectNextNode,
     SelectNextSiblingNode,
     SelectParentNode,
@@ -336,6 +337,29 @@ fn handle_event(model: &mut Model) -> Result<Option<Message>> {
 
 fn handle_key(model: &mut Model, key: event::KeyEvent) -> Option<Message> {
     if model.state == State::EnteringText {
+        if model.has_active_fuzzy() {
+            return match key.code {
+                KeyCode::Esc => Some(Message::Clear),
+                KeyCode::Enter => Some(Message::SubmitTextInput),
+                KeyCode::Up => {
+                    model.move_fuzzy_selection_up();
+                    None
+                }
+                KeyCode::Down | KeyCode::BackTab => {
+                    model.move_fuzzy_selection_down();
+                    None
+                }
+                KeyCode::Tab => {
+                    model.move_fuzzy_selection_up();
+                    None
+                }
+                _ => {
+                    model.forward_text_input_key(key);
+                    model.update_fuzzy_filter();
+                    None
+                }
+            };
+        }
         return match key.code {
             KeyCode::Esc => Some(Message::Clear),
             KeyCode::Enter => Some(Message::SubmitTextInput),
@@ -360,6 +384,7 @@ fn handle_key(model: &mut Model, key: event::KeyEvent) -> Option<Message> {
         KeyCode::Tab => Some(Message::ToggleLogListFold),
         KeyCode::Esc => Some(Message::Clear),
         KeyCode::Char('@') => Some(Message::SelectCurrentWorkingCopy),
+        KeyCode::Char('/') => Some(Message::SelectInRevset),
         KeyCode::Char('L') => Some(Message::SetRevset),
         KeyCode::Char('I') => Some(Message::ToggleIgnoreImmutable),
         KeyCode::Char('?') => Some(Message::ShowHelp),
@@ -398,6 +423,7 @@ fn handle_msg(term: Term, model: &mut Model, msg: Message) -> Result<Option<Mess
         Message::ScrollDownPage => model.scroll_down_page(),
         Message::ScrollUpPage => model.scroll_up_page(),
         Message::SelectCurrentWorkingCopy => model.select_current_working_copy(),
+        Message::SelectInRevset => model.select_in_revset(),
         Message::SelectNextNode => model.select_next_node(),
         Message::SelectNextSiblingNode => model.select_current_next_sibling_node()?,
         Message::SelectParentNode => model.select_parent_node()?,

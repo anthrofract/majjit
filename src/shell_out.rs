@@ -13,6 +13,7 @@ pub struct JjCommand {
     interactive_term: Option<Term>,
     return_output: ReturnOutput,
     sync: bool,
+    color: bool,
 }
 
 impl JjCommand {
@@ -28,6 +29,7 @@ impl JjCommand {
             interactive_term,
             return_output,
             sync: true,
+            color: true,
         }
     }
 
@@ -43,6 +45,18 @@ impl JjCommand {
             interactive_term,
             return_output,
             sync: false,
+            color: true,
+        }
+    }
+
+    fn _new_no_color(args: &[&str], global_args: GlobalArgs, return_output: ReturnOutput) -> Self {
+        Self {
+            args: args.iter().map(|a| a.to_string()).collect(),
+            global_args,
+            interactive_term: None,
+            return_output,
+            sync: false,
+            color: false,
         }
     }
 
@@ -117,10 +131,15 @@ impl JjCommand {
     }
 
     fn base_command(&self) -> Command {
+        self._base_command(self.color)
+    }
+
+    fn _base_command(&self, color: bool) -> Command {
         let mut command = Command::new("jj");
+        let color_value = if color { "always" } else { "never" };
         let args = [
             "--color",
-            "always",
+            color_value,
             "--config",
             "ui.pager=:builtin",
             "--config",
@@ -479,6 +498,54 @@ impl JjCommand {
             args.push(value);
         }
         Self::_new(&args, global_args, None, ReturnOutput::Stderr)
+    }
+
+    pub fn git_remote_list(global_args: GlobalArgs) -> Self {
+        let args = ["git", "remote", "list"];
+        Self::_new_skip_sync(&args, global_args, None, ReturnOutput::Stdout)
+    }
+
+    pub fn log_targets(revset: &str, global_args: GlobalArgs) -> Self {
+        let template = concat!(
+            r#"change_id.shortest(8) ++ "\n""#,
+            r#" ++ commit_id.shortest(8) ++ "\n""#,
+            r#" ++ local_bookmarks.map(|b| b.name()).join("\n") ++ "\n""#,
+            r#" ++ remote_bookmarks.filter(|b| b.remote() != "git").map(|b| b.name() ++ "@" ++ b.remote()).join("\n") ++ "\n""#,
+        );
+        let args = vec!["log", "--no-graph", "--revisions", revset, "-T", template];
+        Self::_new_no_color(&args, global_args, ReturnOutput::Stdout)
+    }
+
+    pub fn bookmark_list_all_names(global_args: GlobalArgs) -> Self {
+        let args = ["bookmark", "list", "--all-remotes", "-T", r#"name ++ "\n""#];
+        Self::_new_skip_sync(&args, global_args, None, ReturnOutput::Stdout)
+    }
+
+    pub fn bookmark_list_tracked_remote(global_args: GlobalArgs) -> Self {
+        let args = [
+            "bookmark",
+            "list",
+            "--tracked",
+            "-T",
+            r#"if(remote, name ++ "@" ++ remote ++ "\n")"#,
+        ];
+        Self::_new_no_color(&args, global_args, ReturnOutput::Stdout)
+    }
+
+    pub fn bookmark_list_untracked_remote(global_args: GlobalArgs) -> Self {
+        let args = [
+            "bookmark",
+            "list",
+            "--all-remotes",
+            "-T",
+            r#"if(remote && !tracked, name ++ "@" ++ remote ++ "\n")"#,
+        ];
+        Self::_new_no_color(&args, global_args, ReturnOutput::Stdout)
+    }
+
+    pub fn file_list(global_args: GlobalArgs) -> Self {
+        let args = ["file", "list"];
+        Self::_new_no_color(&args, global_args, ReturnOutput::Stdout)
     }
 
     pub fn bookmark_create(bookmark_names: &str, change_id: &str, global_args: GlobalArgs) -> Self {

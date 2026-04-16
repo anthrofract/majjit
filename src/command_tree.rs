@@ -145,6 +145,7 @@ impl CommandTree {
             ("h/← ", "Prev sibling"),
             ("K", "Select parent"),
             ("@", "Select @ change"),
+            ("/", "Select in revset"),
         ]
         .iter()
         .map(|(key, help)| (key.to_string(), help.to_string()))
