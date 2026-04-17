@@ -69,8 +69,13 @@ Or run the nix flake:
 nix run github:anthrofract/jjdag
 ```
 
-Or install the nix flake:
+Or install with the nix flake:
 
 ```nix
 inputs.jjdag.url = "github:anthrofract/jjdag";
+
+...
+
+nixpkgs.overlays = [ jjdag.overlays.default ];
+environment.systemPackages = [ pkgs.jjdag ];
 ```
