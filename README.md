@@ -1,20 +1,31 @@
 # jjdag
 
-![](screenshot.png)
-
 A Rust TUI to manipulate the [Jujutsu](https://github.com/jj-vcs/jj) DAG.
 
 Inspired by the great UX of [Magit](https://magit.vc/).
 
-Very much a work in progress, consider this a pre-alpha release. But I already use it personally for almost all jj operations.
-
 Once you run the program you can press `?` to show the help info. Most of the commands you can see by running `jj help` in the terminal are implemented.
+
+## Screenshots
+
+### Help menu
+
+![](media/screenshot1.png)
+
+### Command output
+
+![](media/screenshot2.png)
+
+### Fuzzy matching
+
+![](media/screenshot3.png)
 
 ## Features
 
 - Browse the jj log tree with dynamic folding/unfolding of commits and file diffs.
 - Multi-key command sequences with transient-menu style help popups. For example type `gpa` to run `jj git push --all`, or `gpt` to run `jj git push --tracked`, or `ss` to squash the selected revision into its parent.
 - Output from jj commands is displayed in the bottom panel.
+- Fuzzy matching for various features like selecting changes or bookmarks.
 - Mouse support: left click to select, right click to toggle folding, and scroll wheel to scroll.
 
 ## Supported jj commands

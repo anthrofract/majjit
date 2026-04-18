@@ -9,6 +9,7 @@
 !README.md
 !flake.lock
 !flake.nix
-!screenshot.png
+!media/
+!media/**
 !src/
 !src/**
