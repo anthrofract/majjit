@@ -1962,6 +1962,72 @@ impl CommandTree {
             ),
             (
                 "Commands",
+                "Workspace",
+                vec![KeyCode::Char('w')],
+                CommandTreeNode::new_children(),
+            ),
+            (
+                "Workspace",
+                "Add",
+                vec![KeyCode::Char('w'), KeyCode::Char('a')],
+                CommandTreeNode::new_children(),
+            ),
+            (
+                "Workspace add",
+                "By path (name from path)",
+                vec![KeyCode::Char('w'), KeyCode::Char('a'), KeyCode::Char('a')],
+                CommandTreeNode::new_action(Message::WorkspaceAddPathOnly),
+            ),
+            (
+                "Workspace add",
+                "By name and path",
+                vec![KeyCode::Char('w'), KeyCode::Char('a'), KeyCode::Char('n')],
+                CommandTreeNode::new_action(Message::WorkspaceAddNamed),
+            ),
+            (
+                "Workspace",
+                "Forget",
+                vec![KeyCode::Char('w'), KeyCode::Char('f')],
+                CommandTreeNode::new_children(),
+            ),
+            (
+                "Workspace forget",
+                "Current",
+                vec![KeyCode::Char('w'), KeyCode::Char('f'), KeyCode::Char('c')],
+                CommandTreeNode::new_action(Message::WorkspaceForgetCurrent),
+            ),
+            (
+                "Workspace forget",
+                "Target",
+                vec![KeyCode::Char('w'), KeyCode::Char('f'), KeyCode::Char('/')],
+                CommandTreeNode::new_action(Message::WorkspaceForgetFuzzy),
+            ),
+            (
+                "Workspace forget",
+                "All at selected change",
+                vec![KeyCode::Char('w'), KeyCode::Char('f'), KeyCode::Char('f')],
+                CommandTreeNode::new_action(Message::WorkspaceForgetAtSelection),
+            ),
+            (
+                "Workspace",
+                "List",
+                vec![KeyCode::Char('w'), KeyCode::Char('L')],
+                CommandTreeNode::new_action(Message::WorkspaceList),
+            ),
+            (
+                "Workspace",
+                "Rename current",
+                vec![KeyCode::Char('w'), KeyCode::Char('r')],
+                CommandTreeNode::new_action(Message::WorkspaceRename),
+            ),
+            (
+                "Workspace",
+                "Update stale",
+                vec![KeyCode::Char('w'), KeyCode::Char('u')],
+                CommandTreeNode::new_action(Message::WorkspaceUpdateStale),
+            ),
+            (
+                "Commands",
                 "Undo last operation",
                 vec![KeyCode::Char('u')],
                 CommandTreeNode::new_action(Message::Undo),
@@ -1982,7 +2048,7 @@ impl CommandTree {
 
 fn render_help_text(entries: HelpEntries) -> Text<'static> {
     const COL_WIDTH: usize = 26;
-    const MAX_ENTRIES_PER_COL: usize = 15;
+    const MAX_ENTRIES_PER_COL: usize = 16;
 
     // Get lines for each column, splitting if over MAX_ENTRIES_PER_COL
     let columns: Vec<Vec<Line>> = entries

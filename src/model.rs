@@ -114,6 +114,14 @@ pub enum TextInputAction {
         destination_type: RebaseDestinationType,
     },
     SelectInRevset,
+    WorkspaceAddPathOnly,
+    WorkspaceAddNamePrompt,
+    WorkspaceAddPathPrompt {
+        name: String,
+    },
+    WorkspaceForget,
+    WorkspaceList,
+    WorkspaceRename,
 }
 
 #[derive(Debug, Clone)]
@@ -268,6 +276,18 @@ impl Model {
         }
     }
 
+    fn get_selected_workspaces(&self) -> Vec<String> {
+        let tree_pos = self.get_selected_tree_position();
+        let Some(commit) = self.jj_log.get_tree_commit(&tree_pos) else {
+            return Vec::new();
+        };
+        commit
+            .workspaces
+            .iter()
+            .map(|w| w.strip_suffix('@').unwrap_or(w).to_string())
+            .collect()
+    }
+
     fn get_selected_file_path(&self) -> Option<&str> {
         let tree_pos = self.get_selected_tree_position();
         self.get_file_path(tree_pos)
@@ -320,6 +340,29 @@ impl Model {
         names.sort();
         names.dedup();
         Ok(names)
+    }
+
+    fn get_workspace_names(&self) -> Result<Vec<String>> {
+        let cmd = JjCommand::jj_workspace_list_names(self.global_args.clone());
+        let output = cmd.run().map_err(|e| anyhow::anyhow!("{}", e))?;
+        let mut names: Vec<String> = output
+            .lines()
+            .map(|line| line.trim().to_string())
+            .filter(|s| !s.is_empty())
+            .collect();
+        names.sort();
+        names.dedup();
+        Ok(names)
+    }
+
+    fn get_current_workspace_name(&self) -> Result<String> {
+        let cmd = JjCommand::jj_workspace_list_current_name(self.global_args.clone());
+        let output = cmd.run().map_err(|e| anyhow::anyhow!("{}", e))?;
+        Ok(output
+            .lines()
+            .map(|line| line.trim().to_string())
+            .find(|s| !s.is_empty())
+            .unwrap_or_default())
     }
 
     fn get_tracked_remote_bookmarks(&self) -> Result<Vec<String>> {
@@ -425,6 +468,12 @@ impl Model {
             for bookmark in &commit.bookmarks {
                 candidates.push(FuzzyCandidate {
                     display: bookmark.clone(),
+                    target: target.clone(),
+                });
+            }
+            for workspace in &commit.workspaces {
+                candidates.push(FuzzyCandidate {
+                    display: workspace.clone(),
                     target: target.clone(),
                 });
             }
@@ -967,6 +1016,23 @@ impl Model {
                 }
                 Ok(())
             }
+            TextInputAction::WorkspaceAddPathOnly => {
+                self.apply_workspace_add_from_input(value, None)
+            }
+            TextInputAction::WorkspaceAddNamePrompt => {
+                self.start_text_input(
+                    "Workspace path",
+                    "",
+                    TextInputAction::WorkspaceAddPathPrompt { name: value },
+                );
+                Ok(())
+            }
+            TextInputAction::WorkspaceAddPathPrompt { name } => {
+                self.apply_workspace_add_from_input(value, Some(name))
+            }
+            TextInputAction::WorkspaceForget => self.apply_workspace_forget_from_input(value),
+            TextInputAction::WorkspaceList => Ok(()),
+            TextInputAction::WorkspaceRename => self.apply_workspace_rename_from_input(value),
         }
     }
 
@@ -2188,6 +2254,99 @@ impl Model {
                 )
             }
         };
+        self.queue_jj_command(cmd)
+    }
+
+    fn apply_workspace_add_from_input(&mut self, path: String, name: Option<String>) -> Result<()> {
+        if path.is_empty() {
+            return self.cancelled();
+        }
+        let name_ref = name.as_deref().filter(|s| !s.is_empty());
+        let cmd = JjCommand::jj_workspace_add(&path, name_ref, self.global_args.clone());
+        self.queue_jj_command(cmd)
+    }
+
+    pub fn jj_workspace_add_path_only(&mut self) -> Result<()> {
+        self.start_text_input("Workspace path", "", TextInputAction::WorkspaceAddPathOnly);
+        Ok(())
+    }
+
+    pub fn jj_workspace_add_named(&mut self) -> Result<()> {
+        self.start_text_input(
+            "Workspace name",
+            "",
+            TextInputAction::WorkspaceAddNamePrompt,
+        );
+        Ok(())
+    }
+
+    fn apply_workspace_forget_from_input(&mut self, name: String) -> Result<()> {
+        if name.is_empty() {
+            return self.cancelled();
+        }
+        let cmd = JjCommand::jj_workspace_forget(&[&name], self.global_args.clone());
+        self.queue_jj_command(cmd)
+    }
+
+    pub fn jj_workspace_forget_current(&mut self) -> Result<()> {
+        let cmd = JjCommand::jj_workspace_forget(&[], self.global_args.clone());
+        self.queue_jj_command(cmd)
+    }
+
+    pub fn jj_workspace_forget_fuzzy(&mut self) -> Result<()> {
+        let workspaces = self.get_workspace_names()?;
+        let candidates = workspaces
+            .into_iter()
+            .map(FuzzyCandidate::from_display)
+            .collect();
+        self.start_fuzzy_input(
+            "Workspace forget",
+            candidates,
+            TextInputAction::WorkspaceForget,
+        );
+        Ok(())
+    }
+
+    pub fn jj_workspace_forget_at_selection(&mut self) -> Result<()> {
+        let workspaces = self.get_selected_workspaces();
+        if workspaces.is_empty() {
+            return self.invalid_selection();
+        }
+        let refs: Vec<&str> = workspaces.iter().map(String::as_str).collect();
+        let cmd = JjCommand::jj_workspace_forget(&refs, self.global_args.clone());
+        self.queue_jj_command(cmd)
+    }
+
+    pub fn jj_workspace_list(&mut self) -> Result<()> {
+        let workspaces = self.get_workspace_names()?;
+        let candidates = workspaces
+            .into_iter()
+            .map(FuzzyCandidate::from_display)
+            .collect();
+        self.start_fuzzy_input("Workspaces", candidates, TextInputAction::WorkspaceList);
+        Ok(())
+    }
+
+    fn apply_workspace_rename_from_input(&mut self, new_name: String) -> Result<()> {
+        if new_name.is_empty() {
+            return self.cancelled();
+        }
+        let cmd = JjCommand::jj_workspace_rename(&new_name, self.global_args.clone());
+        self.queue_jj_command(cmd)
+    }
+
+    pub fn jj_workspace_rename(&mut self) -> Result<()> {
+        let current = self.get_current_workspace_name()?;
+        self.start_text_input(
+            "Rename current workspace to",
+            &current,
+            TextInputAction::WorkspaceRename,
+        );
+        Ok(())
+    }
+
+    pub fn jj_workspace_update_stale(&mut self) -> Result<()> {
+        let cmd = JjCommand::jj_workspace_update_stale(self.global_args.clone());
         self.queue_jj_command(cmd)
     }
 

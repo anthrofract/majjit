@@ -210,6 +210,7 @@ pub struct Commit {
     pub change_id: String,
     pub commit_id: String,
     pub current_working_copy: bool,
+    pub workspaces: Vec<String>,
     pub bookmarks: Vec<String>,
     pub description_first_line: Option<String>,
     _has_conflict: bool,
@@ -238,7 +239,7 @@ pub struct Commit {
 pub const COMMIT_FIELD_MARKER: &str = "_MAJJIT_";
 
 /// Number of structured fields between the leading and trailing markers.
-const COMMIT_NUM_FIELDS: usize = 10;
+const COMMIT_NUM_FIELDS: usize = 11;
 
 impl Commit {
     fn new(line1: String, line2: Option<String>) -> Result<Self> {
@@ -250,6 +251,7 @@ impl Commit {
             has_conflict,
             empty,
             is_root,
+            workspaces,
             bookmarks,
             email,
             timestamp,
@@ -271,6 +273,7 @@ impl Commit {
             description_first_line: Some(description).filter(|s| !s.is_empty()),
             _email: email,
             _timestamp: timestamp,
+            workspaces: workspaces.split_whitespace().map(str::to_string).collect(),
             bookmarks: bookmarks.split_whitespace().map(str::to_string).collect(),
             line1_gutter_ansi,
             line2_graph_chars,

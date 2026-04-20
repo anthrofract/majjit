@@ -198,6 +198,7 @@ impl JjCommand {
                 "{m}", if(conflict, "Y", "N"),
                 "{m}", if(empty, "Y", "N"),
                 "{m}", if(root, "Y", "N"),
+                "{m}", working_copies,
                 "{m}", local_bookmarks.map(|b| b.name()).join(" "),
                 "{m}", coalesce(author.email(), ""),
                 "{m}", author.timestamp().local().format("%Y-%m-%d %H:%M:%S"),
@@ -205,7 +206,14 @@ impl JjCommand {
                 "{m}"
             )) ++ builtin_log_compact"#,
         );
-        let args = ["log", "--template", &template, "--revisions", revset];
+        let args = [
+            "log",
+            "--ignore-working-copy",
+            "--template",
+            &template,
+            "--revisions",
+            revset,
+        ];
         Self::new(&args, global_args, None, ReturnOutput::Stdout)
     }
 
@@ -215,6 +223,7 @@ impl JjCommand {
             r#" ++ commit_id.shortest(8) ++ "\n""#,
             r#" ++ local_bookmarks.map(|b| b.name()).join("\n") ++ "\n""#,
             r#" ++ remote_bookmarks.filter(|b| b.remote() != "git").map(|b| b.name() ++ "@" ++ b.remote()).join("\n") ++ "\n""#,
+            r#" ++ working_copies ++ "\n""#,
         );
         let args = vec!["log", "--no-graph", "--revisions", revset, "-T", template];
         Self::new_no_color(&args, global_args, ReturnOutput::Stdout)
@@ -668,6 +677,58 @@ impl JjCommand {
             let stderr = String::from_utf8_lossy(&output.stderr).into();
             Err(JjCommandError::new_failed(stderr))
         }
+    }
+
+    pub fn jj_workspace_list_names(global_args: GlobalArgs) -> Self {
+        let args = [
+            "workspace",
+            "list",
+            "--ignore-working-copy",
+            "-T",
+            r#"name ++ "\n""#,
+        ];
+        Self::new_no_color(&args, global_args, ReturnOutput::Stdout)
+    }
+
+    pub fn jj_workspace_list_current_name(global_args: GlobalArgs) -> Self {
+        let args = [
+            "workspace",
+            "list",
+            "--ignore-working-copy",
+            "-T",
+            r#"if(target.current_working_copy(), name ++ "\n")"#,
+        ];
+        Self::new_no_color(&args, global_args, ReturnOutput::Stdout)
+    }
+
+    pub fn jj_workspace_add(
+        destination: &str,
+        name: Option<&str>,
+        global_args: GlobalArgs,
+    ) -> Self {
+        let mut args = vec!["workspace", "add"];
+        if let Some(n) = name {
+            args.push("--name");
+            args.push(n);
+        }
+        args.push(destination);
+        Self::new(&args, global_args, None, ReturnOutput::Stderr)
+    }
+
+    pub fn jj_workspace_forget(names: &[&str], global_args: GlobalArgs) -> Self {
+        let mut args = vec!["workspace", "forget"];
+        args.extend(names);
+        Self::new(&args, global_args, None, ReturnOutput::Stderr)
+    }
+
+    pub fn jj_workspace_rename(new_name: &str, global_args: GlobalArgs) -> Self {
+        let args = ["workspace", "rename", new_name];
+        Self::new(&args, global_args, None, ReturnOutput::Stderr)
+    }
+
+    pub fn jj_workspace_update_stale(global_args: GlobalArgs) -> Self {
+        let args = ["workspace", "update-stale"];
+        Self::new(&args, global_args, None, ReturnOutput::Stderr)
     }
 
     pub fn jj_ensure_valid_repo(repository: &str) -> Result<String, JjCommandError> {

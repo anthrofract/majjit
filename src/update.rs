@@ -136,6 +136,14 @@ pub enum Message {
     View {
         mode: ViewMode,
     },
+    WorkspaceAddPathOnly,
+    WorkspaceAddNamed,
+    WorkspaceForgetAtSelection,
+    WorkspaceForgetCurrent,
+    WorkspaceForgetFuzzy,
+    WorkspaceList,
+    WorkspaceRename,
+    WorkspaceUpdateStale,
 }
 
 #[derive(Debug, PartialEq, Clone, Copy)]
@@ -530,6 +538,14 @@ fn handle_msg(term: Term, model: &mut Model, msg: Message) -> Result<Option<Mess
         Message::Status => model.jj_status(term)?,
         Message::Undo => model.jj_undo()?,
         Message::View { mode } => model.jj_view(mode, term)?,
+        Message::WorkspaceAddPathOnly => model.jj_workspace_add_path_only()?,
+        Message::WorkspaceAddNamed => model.jj_workspace_add_named()?,
+        Message::WorkspaceForgetAtSelection => model.jj_workspace_forget_at_selection()?,
+        Message::WorkspaceForgetCurrent => model.jj_workspace_forget_current()?,
+        Message::WorkspaceForgetFuzzy => model.jj_workspace_forget_fuzzy()?,
+        Message::WorkspaceList => model.jj_workspace_list()?,
+        Message::WorkspaceRename => model.jj_workspace_rename()?,
+        Message::WorkspaceUpdateStale => model.jj_workspace_update_stale()?,
     };
 
     Ok(None)
