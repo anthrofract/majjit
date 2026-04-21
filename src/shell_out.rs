@@ -19,6 +19,7 @@ pub struct JjCommand {
 
 #[derive(Debug)]
 enum ReturnOutput {
+    Combined,
     Stdout,
     Stderr,
 }
@@ -89,6 +90,7 @@ impl JjCommand {
             Some(term) => self.run_interactive(term),
         }?;
         match self.return_output {
+            ReturnOutput::Combined => Ok(combine_output(output.stdout, output.stderr)),
             ReturnOutput::Stdout => Ok(output.stdout),
             ReturnOutput::Stderr => Ok(output.stderr),
         }
@@ -402,6 +404,18 @@ impl JjCommand {
     ) -> Self {
         let args = vec!["rebase", source_type, source, destination_type, destination];
         Self::new(&args, global_args, None, ReturnOutput::Stderr)
+    }
+
+    pub fn jj_raw(args: &str, global_args: GlobalArgs) -> Result<Self> {
+        let parsed = shell_words::split(args)?;
+        Ok(Self {
+            args: parsed,
+            global_args,
+            interactive_term: None,
+            return_output: ReturnOutput::Combined,
+            sync: true,
+            color: true,
+        })
     }
 
     pub fn jj_resolve(
@@ -814,6 +828,15 @@ impl std::fmt::Display for JjCommandError {
 }
 
 impl std::error::Error for JjCommandError {}
+
+fn combine_output(stdout: String, stderr: String) -> String {
+    match (stdout.is_empty(), stderr.is_empty()) {
+        (true, true) => String::new(),
+        (false, true) => stdout,
+        (true, false) => stderr,
+        (false, false) => format!("{stdout}\n{stderr}"),
+    }
+}
 
 pub fn open_file_in_editor(interactive_term: Term, file_path: &str) -> Result<()> {
     let editor = env::var("EDITOR").unwrap_or_else(|_| "vim".to_string());

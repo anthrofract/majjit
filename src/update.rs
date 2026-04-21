@@ -34,6 +34,7 @@ pub enum Message {
     BookmarkTrack,
     BookmarkUntrack,
     Clear,
+    Custom,
     Commit,
     Describe,
     DescribeInline,
@@ -69,6 +70,7 @@ pub enum Message {
     },
     NewAfterTrunkSync,
     NewAtTarget,
+    NewRevsets,
     NextPrev {
         direction: NextPrevDirection,
         mode: NextPrevMode,
@@ -86,6 +88,7 @@ pub enum Message {
     },
     RebaseSelectedBranchOntoTrunk,
     RebaseSelectedBranchOntoTrunkSync,
+    RebaseCustom,
     RebaseTargetFuzzy {
         source_type: RebaseSourceType,
         destination_type: RebaseDestinationType,
@@ -495,6 +498,7 @@ fn handle_msg(term: Term, model: &mut Model, msg: Message) -> Result<Option<Mess
         Message::BookmarkTrack => model.jj_bookmark_track()?,
         Message::BookmarkUntrack => model.jj_bookmark_untrack()?,
         Message::Commit => model.jj_commit(term)?,
+        Message::Custom => model.jj_custom()?,
         Message::Describe => model.jj_describe(term)?,
         Message::DescribeInline => model.start_describe_input()?,
         Message::Duplicate {
@@ -513,6 +517,7 @@ fn handle_msg(term: Term, model: &mut Model, msg: Message) -> Result<Option<Mess
         Message::New { mode } => model.jj_new(mode)?,
         Message::NewAfterTrunkSync => model.jj_new_after_trunk_sync()?,
         Message::NewAtTarget => model.jj_new_at_target()?,
+        Message::NewRevsets => model.jj_new_revsets()?,
         Message::NextPrev {
             direction,
             mode,
@@ -529,6 +534,7 @@ fn handle_msg(term: Term, model: &mut Model, msg: Message) -> Result<Option<Mess
         Message::RebaseSelectedBranchOntoTrunkSync => {
             model.jj_rebase_selected_branch_onto_trunk_sync()?
         }
+        Message::RebaseCustom => model.jj_rebase_custom()?,
         Message::RebaseTargetFuzzy {
             source_type,
             destination_type,

@@ -234,6 +234,12 @@ impl CommandTree {
                 CommandTreeNode::new_children(),
             ),
             (
+                "Commands",
+                "Custom",
+                vec![KeyCode::Char('C')],
+                CommandTreeNode::new_action(Message::Custom),
+            ),
+            (
                 "Bookmark",
                 "Create at selection",
                 vec![KeyCode::Char('b'), KeyCode::Char('c')],
@@ -898,6 +904,12 @@ impl CommandTree {
                 CommandTreeNode::new_action(Message::NewAtTarget),
             ),
             (
+                "New",
+                "After revsets",
+                vec![KeyCode::Char('n'), KeyCode::Char('r')],
+                CommandTreeNode::new_action(Message::NewRevsets),
+            ),
+            (
                 "Commands",
                 "Next",
                 vec![KeyCode::Char('N')],
@@ -1242,6 +1254,12 @@ impl CommandTree {
                 "Selected revision",
                 vec![KeyCode::Char('r'), KeyCode::Char('r')],
                 CommandTreeNode::new_action_with_children(Message::SaveSelection),
+            ),
+            (
+                "Rebase",
+                "Custom",
+                vec![KeyCode::Char('r'), KeyCode::Char('c')],
+                CommandTreeNode::new_action(Message::RebaseCustom),
             ),
             (
                 "Rebase branch",

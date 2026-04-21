@@ -89,6 +89,7 @@ pub enum TextInputAction {
     BookmarkSet,
     BookmarkTrack,
     BookmarkUntrack,
+    Custom,
     EditTarget,
     FileTrack,
     GitFetchBranch,
@@ -104,11 +105,13 @@ pub enum TextInputAction {
         change_id: String,
     },
     NewAtTarget,
+    NewRevsets,
     NextPrevOffset {
         direction: NextPrevDirection,
         mode: NextPrevMode,
     },
     ParallelizeRevset,
+    RebaseCustom,
     RebaseTarget {
         source_type: RebaseSourceType,
         destination_type: RebaseDestinationType,
@@ -1018,6 +1021,7 @@ impl Model {
             TextInputAction::BookmarkSet => self.apply_bookmark_set_from_input(value),
             TextInputAction::BookmarkTrack => self.apply_bookmark_track_from_input(value),
             TextInputAction::BookmarkUntrack => self.apply_bookmark_untrack_from_input(value),
+            TextInputAction::Custom => self.apply_custom_from_input(value),
             TextInputAction::EditTarget => self.apply_edit_target_from_input(value),
             TextInputAction::FileTrack => self.apply_file_track_from_input(value),
             TextInputAction::GitFetchBranch => self.apply_git_fetch_from_input(Some("-b"), value),
@@ -1034,11 +1038,14 @@ impl Model {
             TextInputAction::MetaeditAuthorTimestamp { change_id } => {
                 self.apply_metaedit_from_input(change_id, "--author-timestamp", value)
             }
-            TextInputAction::NewAtTarget => self.apply_new_at_target_from_input(value),
+            TextInputAction::NewAtTarget | TextInputAction::NewRevsets => {
+                self.apply_new_from_input(value)
+            }
             TextInputAction::NextPrevOffset { direction, mode } => {
                 self.apply_next_prev_from_input(direction, mode, value)
             }
             TextInputAction::ParallelizeRevset => self.apply_parallelize_from_input(value),
+            TextInputAction::RebaseCustom => self.apply_rebase_custom_from_input(value),
             TextInputAction::RebaseTarget {
                 source_type,
                 destination_type,
@@ -1860,11 +1867,6 @@ impl Model {
         self.queue_jj_commands(vec![fetch_cmd, new_cmd])
     }
 
-    fn apply_new_at_target_from_input(&mut self, target: String) -> Result<()> {
-        let cmd = JjCommand::jj_new(&target, &[], self.global_args.clone());
-        self.queue_jj_command(cmd)
-    }
-
     pub fn jj_new_at_target(&mut self) -> Result<()> {
         let targets = self.get_revision_targets()?;
         let candidates = targets
@@ -1872,6 +1874,16 @@ impl Model {
             .map(FuzzyCandidate::from_display)
             .collect();
         self.start_fuzzy_input("New after", candidates, TextInputAction::NewAtTarget);
+        Ok(())
+    }
+
+    fn apply_new_from_input(&mut self, value: String) -> Result<()> {
+        let cmd = JjCommand::jj_new(&value, &[], self.global_args.clone());
+        self.queue_jj_command(cmd)
+    }
+
+    pub fn jj_new_revsets(&mut self) -> Result<()> {
+        self.start_text_input("Revsets", "", TextInputAction::NewRevsets);
         Ok(())
     }
 
@@ -2011,6 +2023,26 @@ impl Model {
                 destination_type,
             },
         );
+        Ok(())
+    }
+
+    fn apply_rebase_custom_from_input(&mut self, args: String) -> Result<()> {
+        let cmd = JjCommand::jj_raw(&format!("rebase {args}"), self.global_args.clone())?;
+        self.queue_jj_command(cmd)
+    }
+
+    fn apply_custom_from_input(&mut self, args: String) -> Result<()> {
+        let cmd = JjCommand::jj_raw(&args, self.global_args.clone())?;
+        self.queue_jj_command(cmd)
+    }
+
+    pub fn jj_custom(&mut self) -> Result<()> {
+        self.start_text_input("Jj args", "", TextInputAction::Custom);
+        Ok(())
+    }
+
+    pub fn jj_rebase_custom(&mut self) -> Result<()> {
+        self.start_text_input("Rebase args", "", TextInputAction::RebaseCustom);
         Ok(())
     }
 
