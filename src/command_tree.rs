@@ -1,9 +1,9 @@
 use crate::update::{
-    AbandonMode, AbsorbMode, BookmarkMoveMode, DuplicateDestination, DuplicateDestinationType,
-    GitFetchMode, GitPushMode, InterdiffMode, Message, MetaeditAction, NewMode, NextPrevDirection,
-    NextPrevMode, ParallelizeSource, RebaseDestination, RebaseDestinationType, RebaseSourceType,
-    RestoreMode, RevertDestination, RevertDestinationType, RevertRevision, SetRevsetMode,
-    SignAction, SimplifyParentsMode, SquashMode, ViewMode,
+    AbandonMode, AbsorbMode, BookmarkMoveMode, BookmarkSetMode, DuplicateDestination,
+    DuplicateDestinationType, GitFetchMode, GitPushMode, InterdiffMode, Message, MetaeditAction,
+    NewMode, NextPrevDirection, NextPrevMode, ParallelizeSource, RebaseDestination,
+    RebaseDestinationType, RebaseSourceType, RestoreMode, RevertDestination, RevertDestinationType,
+    RevertRevision, SetRevsetMode, SignAction, SimplifyParentsMode, SquashMode, ViewMode,
 };
 use crossterm::event::KeyCode;
 use indexmap::IndexMap;
@@ -313,7 +313,7 @@ impl CommandTree {
                 CommandTreeNode::new_action_with_children(Message::SaveSelection),
             ),
             (
-                "Move bookmark to, allowing backwards",
+                "Move bookmark to (allow backwards)",
                 "Select destination",
                 vec![
                     KeyCode::Char('b'),
@@ -367,7 +367,7 @@ impl CommandTree {
             ),
             (
                 "Bookmark",
-                "Forget, including remotes",
+                "Forget (including remotes)",
                 vec![KeyCode::Char('b'), KeyCode::Char('F')],
                 CommandTreeNode::new_action(Message::BookmarkForget {
                     include_remotes: true,
@@ -377,7 +377,17 @@ impl CommandTree {
                 "Bookmark",
                 "Set to selection",
                 vec![KeyCode::Char('b'), KeyCode::Char('s')],
-                CommandTreeNode::new_action(Message::BookmarkSet),
+                CommandTreeNode::new_action(Message::BookmarkSet {
+                    mode: BookmarkSetMode::Default,
+                }),
+            ),
+            (
+                "Bookmark",
+                "Set to selection (allow backwards)",
+                vec![KeyCode::Char('b'), KeyCode::Char('S')],
+                CommandTreeNode::new_action(Message::BookmarkSet {
+                    mode: BookmarkSetMode::AllowBackwards,
+                }),
             ),
             (
                 "Commands",

@@ -30,7 +30,9 @@ pub enum Message {
         mode: BookmarkMoveMode,
     },
     BookmarkRename,
-    BookmarkSet,
+    BookmarkSet {
+        mode: BookmarkSetMode,
+    },
     BookmarkTrack,
     BookmarkUntrack,
     Clear,
@@ -172,6 +174,12 @@ pub enum BookmarkMoveMode {
     AllowBackwards,
     Default,
     Tug,
+}
+
+#[derive(Debug, PartialEq, Clone, Copy)]
+pub enum BookmarkSetMode {
+    AllowBackwards,
+    Default,
 }
 
 #[derive(Debug, PartialEq, Clone, Copy)]
@@ -494,7 +502,7 @@ fn handle_msg(term: Term, model: &mut Model, msg: Message) -> Result<Option<Mess
         Message::BookmarkListConflicted => model.jj_bookmark_list_conflicted()?,
         Message::BookmarkMove { mode } => model.jj_bookmark_move(mode)?,
         Message::BookmarkRename => model.jj_bookmark_rename()?,
-        Message::BookmarkSet => model.jj_bookmark_set()?,
+        Message::BookmarkSet { mode } => model.jj_bookmark_set(mode)?,
         Message::BookmarkTrack => model.jj_bookmark_track()?,
         Message::BookmarkUntrack => model.jj_bookmark_untrack()?,
         Message::Commit => model.jj_commit(term)?,

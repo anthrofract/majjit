@@ -687,8 +687,16 @@ impl JjCommand {
         Self::new(&args, global_args, None, ReturnOutput::Stderr)
     }
 
-    pub fn jj_bookmark_set(bookmark_names: &str, change_id: &str, global_args: GlobalArgs) -> Self {
-        let args = ["bookmark", "set", bookmark_names, "--revision", change_id];
+    pub fn jj_bookmark_set(
+        bookmark_names: &str,
+        change_id: &str,
+        allow_backwards: bool,
+        global_args: GlobalArgs,
+    ) -> Self {
+        let mut args = vec!["bookmark", "set", bookmark_names, "--revision", change_id];
+        if allow_backwards {
+            args.push("--allow-backwards");
+        }
         Self::new(&args, global_args, None, ReturnOutput::Stderr)
     }
 

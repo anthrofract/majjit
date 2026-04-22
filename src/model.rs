@@ -4,10 +4,10 @@ use crate::{
     shell_out::{JjCommand, JjCommandError, open_file_in_editor},
     terminal::Term,
     update::{
-        AbandonMode, AbsorbMode, BookmarkMoveMode, DuplicateDestination, DuplicateDestinationType,
-        GitFetchMode, GitPushMode, InterdiffMode, Message, MetaeditAction, NewMode,
-        NextPrevDirection, NextPrevMode, ParallelizeSource, RebaseDestination,
-        RebaseDestinationType, RebaseSourceType, RestoreMode, RevertDestination,
+        AbandonMode, AbsorbMode, BookmarkMoveMode, BookmarkSetMode, DuplicateDestination,
+        DuplicateDestinationType, GitFetchMode, GitPushMode, InterdiffMode, Message,
+        MetaeditAction, NewMode, NextPrevDirection, NextPrevMode, ParallelizeSource,
+        RebaseDestination, RebaseDestinationType, RebaseSourceType, RestoreMode, RevertDestination,
         RevertDestinationType, RevertRevision, SetRevsetMode, SignAction, SimplifyParentsMode,
         SquashMode, ViewMode,
     },
@@ -86,7 +86,9 @@ pub enum TextInputAction {
     BookmarkRenameTo {
         old_name: String,
     },
-    BookmarkSet,
+    BookmarkSet {
+        mode: BookmarkSetMode,
+    },
     BookmarkTrack,
     BookmarkUntrack,
     Custom,
@@ -1018,7 +1020,9 @@ impl Model {
             TextInputAction::BookmarkRenameTo { old_name } => {
                 self.apply_bookmark_rename_from_input(old_name, value)
             }
-            TextInputAction::BookmarkSet => self.apply_bookmark_set_from_input(value),
+            TextInputAction::BookmarkSet { mode } => {
+                self.apply_bookmark_set_from_input(value, mode)
+            }
             TextInputAction::BookmarkTrack => self.apply_bookmark_track_from_input(value),
             TextInputAction::BookmarkUntrack => self.apply_bookmark_untrack_from_input(value),
             TextInputAction::Custom => self.apply_custom_from_input(value),
@@ -1439,15 +1443,25 @@ impl Model {
         Ok(())
     }
 
-    fn apply_bookmark_set_from_input(&mut self, bookmark_names: String) -> Result<()> {
+    fn apply_bookmark_set_from_input(
+        &mut self,
+        bookmark_names: String,
+        mode: BookmarkSetMode,
+    ) -> Result<()> {
         let Some(change_id) = self.get_selected_change_id() else {
             return self.invalid_selection();
         };
-        let cmd = JjCommand::jj_bookmark_set(&bookmark_names, change_id, self.global_args.clone());
+        let allow_backwards = mode == BookmarkSetMode::AllowBackwards;
+        let cmd = JjCommand::jj_bookmark_set(
+            &bookmark_names,
+            change_id,
+            allow_backwards,
+            self.global_args.clone(),
+        );
         self.queue_jj_command(cmd)
     }
 
-    pub fn jj_bookmark_set(&mut self) -> Result<()> {
+    pub fn jj_bookmark_set(&mut self, mode: BookmarkSetMode) -> Result<()> {
         if self.get_selected_change_id().is_none() {
             return self.invalid_selection();
         }
@@ -1456,7 +1470,11 @@ impl Model {
             .into_iter()
             .map(FuzzyCandidate::from_display)
             .collect();
-        self.start_fuzzy_input("Bookmark set", candidates, TextInputAction::BookmarkSet);
+        self.start_fuzzy_input(
+            "Bookmark set",
+            candidates,
+            TextInputAction::BookmarkSet { mode },
+        );
         Ok(())
     }
 
