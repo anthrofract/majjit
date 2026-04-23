@@ -40,12 +40,14 @@ fn main() {
 fn run() -> Result<()> {
     let args = Args::parse();
     let repository = JjCommand::jj_ensure_valid_repo(&args.repository)?;
-    let model = Model::new(repository, args.revisions)?;
-
     let terminal = terminal::init_terminal()?;
-    let result = tui_loop(model, terminal);
+    let model = Model::new(
+        repository,
+        args.revisions,
+        terminal::detect_terminal_theme()?,
+    )?;
+    let result = tui_loop(model, terminal.clone());
     terminal::relinquish_terminal()?;
-
     result
 }
 

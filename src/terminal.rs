@@ -11,6 +11,7 @@ use std::{
     panic,
     rc::Rc,
 };
+use terminal_colorsaurus::{QueryOptions, ThemeMode};
 
 pub type Term = Rc<RefCell<Terminal<CrosstermBackend<Stdout>>>>;
 
@@ -43,4 +44,8 @@ pub fn install_panic_hook() {
         relinquish_terminal().unwrap();
         original_hook(panic_info);
     }));
+}
+
+pub fn detect_terminal_theme() -> Result<ThemeMode> {
+    Ok(terminal_colorsaurus::theme_mode(QueryOptions::default())?)
 }

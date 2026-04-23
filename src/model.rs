@@ -22,6 +22,7 @@ use ratatui::{
     widgets::ListState,
 };
 use ratatui_textarea::{CursorMove, TextArea};
+use terminal_colorsaurus::ThemeMode;
 
 pub const DEFAULT_REVSET: &str =
     "present(@) | ancestors(immutable_heads().., 32) | remote_bookmarks() | root()";
@@ -140,6 +141,7 @@ pub struct Model {
     pub global_args: GlobalArgs,
     pub display_repository: String,
     pub revset: String,
+    pub theme: ThemeMode,
     pub state: State,
     pub command_tree: CommandTree,
     command_keys: Vec<KeyCode>,
@@ -166,7 +168,7 @@ enum ScrollDirection {
 }
 
 impl Model {
-    pub fn new(repository: String, revset: String) -> Result<Self> {
+    pub fn new(repository: String, revset: String, terminal_theme_mode: ThemeMode) -> Result<Self> {
         let mut model = Self {
             state: State::default(),
             command_tree: CommandTree::new(),
@@ -186,6 +188,7 @@ impl Model {
             info_list: None,
             text_input: None,
             display_repository: format_repository_for_display(&repository),
+            theme: terminal_theme_mode,
             global_args: GlobalArgs {
                 repository,
                 ignore_immutable: false,

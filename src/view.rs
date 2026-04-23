@@ -7,10 +7,23 @@ use ratatui::{
     text::{Line, Span},
     widgets::{Block, Borders, List, Paragraph},
 };
+use terminal_colorsaurus::ThemeMode;
 
-pub const SELECTION_COLOR: Color = Color::Rgb(40, 42, 54);
-pub const SAVED_SELECTION_COLOR: Color = Color::Rgb(33, 35, 45);
 const FUZZY_HIGHLIGHT_COLOR: Color = Color::Rgb(0xC9, 0x8E, 0x56);
+
+fn selection_color(terminal_theme_mode: ThemeMode) -> Color {
+    match terminal_theme_mode {
+        ThemeMode::Dark => Color::Rgb(40, 42, 54),
+        ThemeMode::Light => Color::Indexed(7),
+    }
+}
+
+fn saved_selection_color(terminal_theme_mode: ThemeMode) -> Color {
+    match terminal_theme_mode {
+        ThemeMode::Dark => Color::Rgb(33, 35, 45),
+        ThemeMode::Light => Color::Indexed(6),
+    }
+}
 
 pub fn view(model: &mut Model, frame: &mut Frame) {
     let header = render_header(model);
@@ -74,31 +87,32 @@ fn render_log_list(model: &Model) -> List<'static> {
     let mut log_items = model.log_list.clone();
     apply_saved_selection_highlights(model, &mut log_items);
     List::new(log_items)
-        .highlight_style(Style::new().bold().bg(SELECTION_COLOR))
+        .highlight_style(Style::new().bold().bg(selection_color(model.theme)))
         .scroll_padding(model.log_list_scroll_padding)
 }
 
 fn apply_saved_selection_highlights(model: &Model, log_items: &mut [ratatui::text::Text<'static>]) {
+    let saved_selection_color = saved_selection_color(model.theme);
     let (saved_commit_idx, saved_file_diff_idx) = model.get_saved_selection_flat_log_idxs();
 
     if let Some(idx) = saved_commit_idx
         && let Some(item) = log_items.get_mut(idx)
     {
-        apply_saved_selection_highlight(item);
+        apply_saved_selection_highlight(item, saved_selection_color);
     }
 
     if let Some(idx) = saved_file_diff_idx
         && let Some(item) = log_items.get_mut(idx)
     {
-        apply_saved_selection_highlight(item);
+        apply_saved_selection_highlight(item, saved_selection_color);
     }
 }
 
-fn apply_saved_selection_highlight(text: &mut ratatui::text::Text<'static>) {
-    text.style = text.style.bg(SAVED_SELECTION_COLOR);
+fn apply_saved_selection_highlight(text: &mut ratatui::text::Text<'static>, color: Color) {
+    text.style = text.style.bg(color);
     for line in &mut text.lines {
         for span in &mut line.spans {
-            span.style = span.style.bg(SAVED_SELECTION_COLOR);
+            span.style = span.style.bg(color);
         }
     }
 }
@@ -115,6 +129,7 @@ fn render_info_list(model: &Model) -> Option<List<'static>> {
 }
 
 fn render_text_input(model: &mut Model, frame: &mut Frame, area: Rect) {
+    let terminal_theme_mode = model.theme;
     let Some(text_input) = model.text_input.as_mut() else {
         model.fuzzy_viewport_height = 0;
         return;
@@ -154,13 +169,18 @@ fn render_text_input(model: &mut Model, frame: &mut Frame, area: Rect) {
         .unwrap_or(0);
 
     if let Some(candidates_area) = candidates_area {
-        render_fuzzy_candidates(text_input, frame, candidates_area);
+        render_fuzzy_candidates(terminal_theme_mode, text_input, frame, candidates_area);
     }
 
     render_prompt_and_textarea(text_input, frame, input_line_area);
 }
 
-fn render_fuzzy_candidates(text_input: &TextInputSession, frame: &mut Frame, area: Rect) {
+fn render_fuzzy_candidates(
+    terminal_theme_mode: ThemeMode,
+    text_input: &TextInputSession,
+    frame: &mut Frame,
+    area: Rect,
+) {
     let Some(fuzzy) = &text_input.fuzzy else {
         return;
     };
@@ -180,7 +200,12 @@ fn render_fuzzy_candidates(text_input: &TextInputSession, frame: &mut Frame, are
         let text = &fuzzy.candidates[candidate.candidate_index].display;
         let is_selected = filter_idx == fuzzy.selected;
 
-        let line = build_highlighted_line(text, &candidate.match_positions, is_selected);
+        let line = build_highlighted_line(
+            terminal_theme_mode,
+            text,
+            &candidate.match_positions,
+            is_selected,
+        );
 
         let row_area = Rect {
             x: area.x,
@@ -189,7 +214,7 @@ fn render_fuzzy_candidates(text_input: &TextInputSession, frame: &mut Frame, are
             height: 1,
         };
         let paragraph = if is_selected {
-            Paragraph::new(line).style(Style::default().bg(SELECTION_COLOR))
+            Paragraph::new(line).style(Style::default().bg(selection_color(terminal_theme_mode)))
         } else {
             Paragraph::new(line)
         };
@@ -198,12 +223,13 @@ fn render_fuzzy_candidates(text_input: &TextInputSession, frame: &mut Frame, are
 }
 
 fn build_highlighted_line<'a>(
+    terminal_theme_mode: ThemeMode,
     text: &str,
     match_positions: &[usize],
     is_selected: bool,
 ) -> Line<'a> {
     let base_style = if is_selected {
-        Style::default().bg(SELECTION_COLOR)
+        Style::default().bg(selection_color(terminal_theme_mode))
     } else {
         Style::default()
     };
