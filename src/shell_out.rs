@@ -210,14 +210,7 @@ impl JjCommand {
                 "{m}"
             )) ++ builtin_log_compact"#,
         );
-        let args = [
-            "log",
-            "--ignore-working-copy",
-            "--template",
-            &template,
-            "--revisions",
-            revset,
-        ];
+        let args = ["log", "--template", &template, "--revisions", revset];
         Self::new(&args, global_args, None, ReturnOutput::Stdout)
     }
 
@@ -234,12 +227,25 @@ impl JjCommand {
     }
 
     pub fn jj_diff_summary(change_id: &str, global_args: GlobalArgs) -> Self {
-        let args = ["diff", "--summary", "--revisions", change_id];
+        let args = [
+            "diff",
+            "--ignore-working-copy",
+            "--summary",
+            "--revisions",
+            change_id,
+        ];
         Self::new(&args, global_args, None, ReturnOutput::Stdout)
     }
 
     pub fn jj_diff_file(change_id: &str, file: &str, global_args: GlobalArgs) -> Self {
-        let args = ["diff", "--color-words", "--revisions", change_id, file];
+        let args = [
+            "diff",
+            "--ignore-working-copy",
+            "--color-words",
+            "--revisions",
+            change_id,
+            file,
+        ];
         Self::new(&args, global_args, None, ReturnOutput::Stdout)
     }
 
