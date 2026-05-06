@@ -21,6 +21,7 @@ pub enum Message {
     BookmarkForget {
         include_remotes: bool,
     },
+    BookmarkAdvance,
     BookmarkListAll,
     BookmarkListLocal,
     BookmarkListTracked,
@@ -179,7 +180,6 @@ pub enum AbsorbMode {
 pub enum BookmarkMoveMode {
     AllowBackwards,
     Default,
-    Tug,
 }
 
 #[derive(Debug, PartialEq, Clone, Copy)]
@@ -515,6 +515,7 @@ fn handle_msg(term: Term, model: &mut Model, msg: Message) -> Result<Option<Mess
         Message::BookmarkCreate => model.jj_bookmark_create()?,
         Message::BookmarkDelete => model.jj_bookmark_delete()?,
         Message::BookmarkForget { include_remotes } => model.jj_bookmark_forget(include_remotes)?,
+        Message::BookmarkAdvance => model.jj_bookmark_advance()?,
         Message::BookmarkListAll => model.jj_bookmark_list_all()?,
         Message::BookmarkListLocal => model.jj_bookmark_list_local()?,
         Message::BookmarkListTracked => model.jj_bookmark_list_tracked()?,

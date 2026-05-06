@@ -242,6 +242,12 @@ impl CommandTree {
             ),
             (
                 "Bookmark",
+                "Advance to selection",
+                vec![KeyCode::Char('b'), KeyCode::Char('a')],
+                CommandTreeNode::new_action(Message::BookmarkAdvance),
+            ),
+            (
+                "Bookmark",
                 "Create at selection",
                 vec![KeyCode::Char('b'), KeyCode::Char('c')],
                 CommandTreeNode::new_action(Message::BookmarkCreate),
@@ -324,14 +330,6 @@ impl CommandTree {
                 ],
                 CommandTreeNode::new_action(Message::BookmarkMove {
                     mode: BookmarkMoveMode::AllowBackwards,
-                }),
-            ),
-            (
-                "Bookmark move",
-                "Tug to selection",
-                vec![KeyCode::Char('b'), KeyCode::Char('m'), KeyCode::Char('t')],
-                CommandTreeNode::new_action(Message::BookmarkMove {
-                    mode: BookmarkMoveMode::Tug,
                 }),
             ),
             (

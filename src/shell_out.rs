@@ -643,6 +643,11 @@ impl JjCommand {
         Self::new(&args, global_args, None, ReturnOutput::Stderr)
     }
 
+    pub fn jj_bookmark_advance(to_change_id: &str, global_args: GlobalArgs) -> Self {
+        let args = ["bookmark", "advance", "--to", to_change_id];
+        Self::new(&args, global_args, None, ReturnOutput::Stderr)
+    }
+
     pub fn jj_bookmark_list_all_names(global_args: GlobalArgs) -> Self {
         let args = ["bookmark", "list", "--all-remotes", "-T", r#"name ++ "\n""#];
         Self::new_skip_sync(&args, global_args, None, ReturnOutput::Stdout)

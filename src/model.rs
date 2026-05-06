@@ -1386,6 +1386,14 @@ impl Model {
         Ok(())
     }
 
+    pub fn jj_bookmark_advance(&mut self) -> Result<()> {
+        let Some(to_change_id) = self.get_selected_change_id() else {
+            return self.invalid_selection();
+        };
+        let cmd = JjCommand::jj_bookmark_advance(to_change_id, self.global_args.clone());
+        self.queue_jj_command(cmd)
+    }
+
     pub fn jj_bookmark_move(&mut self, mode: BookmarkMoveMode) -> Result<()> {
         let (from_change_id, to_change_id, allow_backwards) = match mode {
             BookmarkMoveMode::Default => {
@@ -1405,16 +1413,6 @@ impl Model {
                     return self.invalid_selection();
                 };
                 (from_change_id.to_string(), to_change_id.to_string(), true)
-            }
-            BookmarkMoveMode::Tug => {
-                let Some(to_change_id) = self.get_selected_change_id() else {
-                    return self.invalid_selection();
-                };
-                (
-                    format!("heads(::{to_change_id} & bookmarks())"),
-                    to_change_id.to_string(),
-                    false,
-                )
             }
         };
         let cmd = JjCommand::jj_bookmark_move(

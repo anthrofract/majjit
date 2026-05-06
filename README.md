@@ -32,6 +32,7 @@ Once you run the program you can press `?` to show the help info. Most of the co
 
 - `jj abandon`
 - `jj absorb`
+- `jj bookmark advance`
 - `jj bookmark create`
 - `jj bookmark delete`
 - `jj bookmark forget`
