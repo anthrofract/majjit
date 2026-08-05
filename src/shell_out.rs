@@ -855,13 +855,17 @@ impl JjCommand {
 #[derive(Debug)]
 pub enum JjCommandError {
     Failed { stderr: String },
+    StaleWorkspace { stderr: String },
     Other { err: anyhow::Error },
 }
 
 impl JjCommandError {
     fn new_failed(stderr: String) -> Self {
-        Self::Failed {
-            stderr: stderr.trim().to_string(),
+        let stderr = stderr.trim().to_string();
+        if is_stale_workspace_error(&stderr) {
+            Self::StaleWorkspace { stderr }
+        } else {
+            Self::Failed { stderr }
         }
     }
 
@@ -873,7 +877,7 @@ impl JjCommandError {
 impl std::fmt::Display for JjCommandError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::Failed { stderr } => {
+            Self::Failed { stderr } | Self::StaleWorkspace { stderr } => {
                 write!(f, "{stderr}")
             }
             Self::Other { err } => err.fmt(f),
@@ -882,6 +886,11 @@ impl std::fmt::Display for JjCommandError {
 }
 
 impl std::error::Error for JjCommandError {}
+
+fn is_stale_workspace_error(message: &str) -> bool {
+    let message = strip_ansi(message);
+    message.contains("Run `jj workspace update-stale` to ")
+}
 
 fn combine_output(stdout: String, stderr: String) -> String {
     match (stdout.is_empty(), stderr.is_empty()) {
@@ -907,4 +916,10 @@ fn strip_non_style_ansi(str: &str) -> String {
     let non_style_ansi_regex =
         Regex::new(r"\x1b(\[[0-9;?]*[ -/]*([@-l]|[n-~])|\].*?(\x07|\x1b\\)|P.*?\x1b\\)").unwrap();
     non_style_ansi_regex.replace_all(str, "").to_string()
+}
+
+fn strip_ansi(str: &str) -> String {
+    let ansi_regex =
+        Regex::new(r"\x1b(\[[0-9;?]*[ -/]*[@-~]|\].*?(\x07|\x1b\\)|P.*?\x1b\\)").unwrap();
+    ansi_regex.replace_all(str, "").to_string()
 }

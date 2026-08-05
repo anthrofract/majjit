@@ -380,7 +380,10 @@ pub fn update(terminal: Term, model: &mut Model) -> Result<()> {
 
     let mut current_msg = handle_event(model)?;
     while let Some(msg) = current_msg {
-        current_msg = handle_msg(terminal.clone(), model, msg)?;
+        match handle_msg(terminal.clone(), model, msg) {
+            Ok(next_msg) => current_msg = next_msg,
+            Err(err) => return model.handle_error(err),
+        }
     }
 
     Ok(())

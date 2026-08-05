@@ -197,7 +197,7 @@ impl Model {
             revset,
         };
 
-        model.sync()?;
+        model.sync().or_else(|err| model.handle_error(err))?;
         Ok(model)
     }
 
@@ -340,7 +340,7 @@ impl Model {
 
     fn get_bookmark_names(&self) -> Result<Vec<String>> {
         let cmd = JjCommand::jj_bookmark_list_all_names(self.global_args.clone());
-        let output = cmd.run().map_err(|e| anyhow::anyhow!("{}", e))?;
+        let output = cmd.run()?;
         let mut names: Vec<String> = output
             .lines()
             .map(|line| line.trim().to_string())
@@ -353,7 +353,7 @@ impl Model {
 
     fn get_workspace_names(&self) -> Result<Vec<String>> {
         let cmd = JjCommand::jj_workspace_list_names(self.global_args.clone());
-        let output = cmd.run().map_err(|e| anyhow::anyhow!("{}", e))?;
+        let output = cmd.run()?;
         let mut names: Vec<String> = output
             .lines()
             .map(|line| line.trim().to_string())
@@ -366,7 +366,7 @@ impl Model {
 
     fn get_current_workspace_name(&self) -> Result<String> {
         let cmd = JjCommand::jj_workspace_list_current_name(self.global_args.clone());
-        let output = cmd.run().map_err(|e| anyhow::anyhow!("{}", e))?;
+        let output = cmd.run()?;
         Ok(output
             .lines()
             .map(|line| line.trim().to_string())
@@ -376,7 +376,7 @@ impl Model {
 
     fn get_tracked_remote_bookmarks(&self) -> Result<Vec<String>> {
         let cmd = JjCommand::jj_bookmark_list_tracked_remote(self.global_args.clone());
-        let output = cmd.run().map_err(|e| anyhow::anyhow!("{}", e))?;
+        let output = cmd.run()?;
         let mut names: Vec<String> = output
             .lines()
             .map(|line| line.trim().to_string())
@@ -389,7 +389,7 @@ impl Model {
 
     fn get_untracked_remote_bookmarks(&self) -> Result<Vec<String>> {
         let cmd = JjCommand::jj_bookmark_list_untracked_remote(self.global_args.clone());
-        let output = cmd.run().map_err(|e| anyhow::anyhow!("{}", e))?;
+        let output = cmd.run()?;
         let mut names: Vec<String> = output
             .lines()
             .map(|line| line.trim().to_string())
@@ -402,7 +402,7 @@ impl Model {
 
     fn get_all_bookmark_display_names(&self) -> Result<Vec<String>> {
         let cmd = JjCommand::jj_bookmark_list_all_display(self.global_args.clone());
-        let output = cmd.run().map_err(|e| anyhow::anyhow!("{}", e))?;
+        let output = cmd.run()?;
         let names: Vec<String> = output
             .lines()
             .map(|line| line.trim().to_string())
@@ -413,7 +413,7 @@ impl Model {
 
     fn get_local_only_bookmark_names(&self) -> Result<Vec<String>> {
         let cmd = JjCommand::jj_bookmark_list_local_only_names(self.global_args.clone());
-        let output = cmd.run().map_err(|e| anyhow::anyhow!("{}", e))?;
+        let output = cmd.run()?;
         let names: Vec<String> = output
             .lines()
             .map(|line| line.trim().to_string())
@@ -424,7 +424,7 @@ impl Model {
 
     fn get_conflicted_bookmark_names(&self) -> Result<Vec<String>> {
         let cmd = JjCommand::jj_bookmark_list_conflicted_names(self.global_args.clone());
-        let output = cmd.run().map_err(|e| anyhow::anyhow!("{}", e))?;
+        let output = cmd.run()?;
         let names: Vec<String> = output
             .lines()
             .map(|line| line.trim().to_string())
@@ -435,7 +435,7 @@ impl Model {
 
     fn get_git_remote_names(&self) -> Result<Vec<String>> {
         let cmd = JjCommand::jj_git_remote_list(self.global_args.clone());
-        let output = cmd.run().map_err(|e| anyhow::anyhow!("{}", e))?;
+        let output = cmd.run()?;
         let remotes = output
             .lines()
             .filter_map(|line| line.split_whitespace().next())
@@ -446,7 +446,7 @@ impl Model {
 
     fn get_revision_targets(&self) -> Result<Vec<String>> {
         let cmd = JjCommand::jj_log_targets(&self.revset, self.global_args.clone());
-        let output = cmd.run().map_err(|e| anyhow::anyhow!("{}", e))?;
+        let output = cmd.run()?;
         let mut targets: Vec<String> = output
             .lines()
             .map(|line| line.trim().to_string())
@@ -459,7 +459,7 @@ impl Model {
 
     fn get_file_list(&self) -> Result<Vec<String>> {
         let cmd = JjCommand::jj_file_list(self.global_args.clone());
-        let output = cmd.run().map_err(|e| anyhow::anyhow!("{}", e))?;
+        let output = cmd.run()?;
         let names: Vec<String> = output
             .lines()
             .map(|line| line.trim().to_string())
@@ -1284,7 +1284,7 @@ impl Model {
         };
 
         let cmd = JjCommand::jj_file_show(&change_id, &file_path, self.global_args.clone());
-        let contents = cmd.run().map_err(|e| anyhow::anyhow!("{}", e))?;
+        let contents = cmd.run()?;
 
         let temp_dir = tempfile::Builder::new()
             .prefix(&format!("majjit-{change_id}-{commit_id}-"))
@@ -2607,6 +2607,27 @@ impl Model {
         self.info_list = Some(Text::from(lines));
     }
 
+    pub fn handle_error(&mut self, err: anyhow::Error) -> Result<()> {
+        let stderr = stale_workspace_stderr(err)?;
+        if !self.accumulated_command_output.is_empty() {
+            self.accumulated_command_output.push(Line::raw(""));
+        }
+        self.accumulated_command_output
+            .extend(stderr.into_text()?.lines);
+        self.queued_jj_commands.insert(
+            0,
+            JjCommand::jj_workspace_update_stale(self.global_args.clone()),
+        );
+        self.update_info_list_for_queue();
+        Ok(())
+    }
+
+    fn finish_command_queue(&mut self) {
+        let final_output = self.accumulated_command_output.clone();
+        self.clear();
+        self.info_list = Some(Text::from(final_output));
+    }
+
     pub fn process_jj_command_queue(&mut self) -> Result<()> {
         if self.queued_jj_commands.is_empty() {
             return Ok(());
@@ -2627,13 +2648,12 @@ impl Model {
                     .extend(output.into_text()?.lines);
 
                 if self.queued_jj_commands.is_empty() {
-                    // All commands done, show final output and sync
-                    let final_output = self.accumulated_command_output.clone();
-                    self.clear();
-                    self.info_list = Some(Text::from(final_output));
-                    if cmd.sync {
-                        self.sync()?;
+                    if cmd.sync
+                        && let Err(err) = self.sync()
+                    {
+                        return self.handle_error(err);
                     }
+                    self.finish_command_queue();
                 } else {
                     // More commands to run, update info_list to show next command
                     self.update_info_list_for_queue();
@@ -2642,17 +2662,32 @@ impl Model {
             Err(err) => match err {
                 JjCommandError::Other { err } => return Err(err),
                 JjCommandError::Failed { stderr } => {
-                    // Command failed, show error with accumulated output
                     self.accumulated_command_output
                         .extend(stderr.into_text()?.lines);
-                    let final_output = self.accumulated_command_output.clone();
-                    self.clear();
-                    self.info_list = Some(Text::from(final_output));
+                    self.finish_command_queue();
+                }
+                JjCommandError::StaleWorkspace { stderr } => {
+                    self.accumulated_command_output
+                        .extend(stderr.into_text()?.lines);
+                    self.queued_jj_commands.insert(0, cmd);
+                    self.queued_jj_commands.insert(
+                        0,
+                        JjCommand::jj_workspace_update_stale(self.global_args.clone()),
+                    );
+                    self.update_info_list_for_queue();
                 }
             },
         }
 
         Ok(())
+    }
+}
+
+fn stale_workspace_stderr(err: anyhow::Error) -> Result<String> {
+    match err.downcast::<JjCommandError>() {
+        Ok(JjCommandError::StaleWorkspace { stderr }) => Ok(stderr),
+        Ok(err) => Err(err.into()),
+        Err(err) => Err(err),
     }
 }
 
