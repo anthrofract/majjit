@@ -1,7 +1,7 @@
 use crate::{
     command_tree::{CommandTree, display_unbound_error_lines},
     log_tree::{DIFF_HUNK_LINE_IDX, JjLog, LogTreeNode, TreePosition, get_parent_tree_position},
-    shell_out::{JjCommand, JjCommandError, open_file_in_editor},
+    shell_out::{JjCommand, JjCommandError, WorkingCopyMode, open_file_in_editor},
     terminal::Term,
     update::{
         AbandonMode, AbsorbMode, BookmarkMoveMode, BookmarkSetMode, DuplicateDestination,
@@ -152,6 +152,7 @@ pub struct Model {
     saved_file_path: Option<String>,
     saved_tree_position: Option<TreePosition>,
     jj_log: JjLog,
+    working_copy_commit_id: Option<String>,
     pub log_list: Vec<Text<'static>>,
     pub log_list_state: ListState,
     log_list_tree_positions: Vec<TreePosition>,
@@ -180,6 +181,7 @@ impl Model {
             saved_change_id: None,
             saved_file_path: None,
             jj_log: JjLog::new()?,
+            working_copy_commit_id: None,
             log_list: Vec::new(),
             log_list_state: ListState::default(),
             log_list_tree_positions: Vec::new(),
@@ -216,9 +218,28 @@ impl Model {
     }
 
     pub fn sync(&mut self) -> Result<()> {
-        self.jj_log.load_log_tree(&self.global_args, &self.revset)?;
+        self.sync_with_working_copy_mode(WorkingCopyMode::Snapshot)
+    }
+
+    fn sync_with_working_copy_mode(&mut self, working_copy_mode: WorkingCopyMode) -> Result<()> {
+        self.jj_log
+            .load_log_tree(&self.global_args, &self.revset, working_copy_mode)?;
+        self.sync_working_copy_commit_id()?;
         self.sync_log_list()?;
         self.reset_log_list_selection()?;
+        Ok(())
+    }
+
+    fn sync_working_copy_commit_id(&mut self) -> Result<()> {
+        self.working_copy_commit_id = Some(
+            JjCommand::jj_current_working_copy_commit_id(
+                self.global_args.clone(),
+                WorkingCopyMode::Ignore,
+            )
+            .run()?
+            .trim()
+            .to_string(),
+        );
         Ok(())
     }
 
@@ -227,7 +248,7 @@ impl Model {
         Ok(())
     }
 
-    pub fn refresh(&mut self) -> Result<()> {
+    pub fn refresh(&mut self, working_copy_mode: WorkingCopyMode) -> Result<()> {
         // Add periods for visual feedback on repeated refreshes
         let periods = self
             .info_list
@@ -236,9 +257,22 @@ impl Model {
             .filter(|s| s.starts_with("Refreshed"))
             .map_or(0, |s| s.matches('.').count() + 3);
         self.clear();
-        self.sync()?;
+        self.sync_with_working_copy_mode(working_copy_mode)?;
         self.info_list = Some(format!("Refreshed{}", ".".repeat(periods)).into());
         Ok(())
+    }
+
+    pub fn snapshot_working_copy_changed(&self) -> Result<bool> {
+        let commit_id = JjCommand::jj_current_working_copy_commit_id(
+            self.global_args.clone(),
+            WorkingCopyMode::Snapshot,
+        )
+        .run()?;
+        Ok(self.working_copy_commit_id.as_deref() != Some(commit_id.trim()))
+    }
+
+    pub fn has_queued_jj_commands(&self) -> bool {
+        !self.queued_jj_commands.is_empty()
     }
 
     pub fn toggle_ignore_immutable(&mut self) {

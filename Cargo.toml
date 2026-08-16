@@ -17,6 +17,8 @@ regex = "1.13.1"
 shell-words = "1.1.1"
 tempfile = "3.27.0"
 terminal-colorsaurus = "1.0.3"
+tokio = { version = "1.53.1", features = ["macros", "rt", "sync"] }
+watchman_client = "0.9.0"
 
 [profile.release]
 codegen-units = 1

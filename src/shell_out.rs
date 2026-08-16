@@ -30,6 +30,12 @@ struct JjCommandOutput {
     stderr: String,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WorkingCopyMode {
+    Snapshot,
+    Ignore,
+}
+
 impl JjCommand {
     fn new(
         args: &[&str],
@@ -192,7 +198,11 @@ impl JjCommand {
         command
     }
 
-    pub fn jj_log(revset: &str, global_args: GlobalArgs) -> Self {
+    pub fn jj_log(
+        revset: &str,
+        global_args: GlobalArgs,
+        working_copy_mode: WorkingCopyMode,
+    ) -> Self {
         let m = COMMIT_FIELD_MARKER;
         let template = format!(
             r#"stringify(concat(
@@ -211,8 +221,30 @@ impl JjCommand {
                 "{m}"
             )) ++ builtin_log_compact"#,
         );
-        let args = ["log", "--template", &template, "--revisions", revset];
+        let mut args = vec!["log"];
+        if working_copy_mode == WorkingCopyMode::Ignore {
+            args.push("--ignore-working-copy");
+        }
+        args.extend(["--template", &template, "--revisions", revset]);
         Self::new(&args, global_args, None, ReturnOutput::Stdout)
+    }
+
+    pub fn jj_current_working_copy_commit_id(
+        global_args: GlobalArgs,
+        working_copy_mode: WorkingCopyMode,
+    ) -> Self {
+        let mut args = vec!["log"];
+        if working_copy_mode == WorkingCopyMode::Ignore {
+            args.push("--ignore-working-copy");
+        }
+        args.extend([
+            "--no-graph",
+            "--revisions",
+            "@",
+            "--template",
+            r#"commit_id ++ "\n""#,
+        ]);
+        Self::new_no_color(&args, global_args, ReturnOutput::Stdout)
     }
 
     pub fn jj_log_targets(revset: &str, global_args: GlobalArgs) -> Self {

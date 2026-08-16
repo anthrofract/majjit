@@ -1,6 +1,8 @@
 use crate::{
     model::{Model, State},
+    shell_out::WorkingCopyMode,
     terminal::Term,
+    watchman::WatchmanMonitor,
 };
 use anyhow::Result;
 use crossterm::event::{self, Event, KeyCode, KeyModifiers, MouseEventKind};
@@ -97,7 +99,9 @@ pub enum Message {
         destination_type: RebaseDestinationType,
     },
     Redo,
-    Refresh,
+    Refresh {
+        working_copy_mode: WorkingCopyMode,
+    },
     Resolve,
     Restore {
         mode: RestoreMode,
@@ -375,10 +379,10 @@ pub enum ViewMode {
     ToSelection,
 }
 
-pub fn update(terminal: Term, model: &mut Model) -> Result<()> {
+pub fn update(terminal: Term, model: &mut Model, watchman: Option<&WatchmanMonitor>) -> Result<()> {
     model.process_jj_command_queue()?;
 
-    let mut current_msg = handle_event(model)?;
+    let mut current_msg = handle_event(model, watchman)?;
     while let Some(msg) = current_msg {
         match handle_msg(terminal.clone(), model, msg) {
             Ok(next_msg) => current_msg = next_msg,
@@ -389,7 +393,11 @@ pub fn update(terminal: Term, model: &mut Model) -> Result<()> {
     Ok(())
 }
 
-fn handle_event(model: &mut Model) -> Result<Option<Message>> {
+fn handle_event(model: &mut Model, watchman: Option<&WatchmanMonitor>) -> Result<Option<Message>> {
+    if let Some(msg) = poll_watchman_refresh(model, watchman)? {
+        return Ok(Some(msg));
+    }
+
     if event::poll(EVENT_POLL_DURATION)? {
         match event::read()? {
             Event::Key(key) if key.kind == event::KeyEventKind::Press => {
@@ -401,6 +409,23 @@ fn handle_event(model: &mut Model) -> Result<Option<Message>> {
             _ => {}
         }
     }
+    Ok(None)
+}
+
+fn poll_watchman_refresh(
+    model: &Model,
+    watchman: Option<&WatchmanMonitor>,
+) -> Result<Option<Message>> {
+    if let Some(watchman) = watchman
+        && !model.has_queued_jj_commands()
+        && watchman.take_change()?
+        && model.snapshot_working_copy_changed()?
+    {
+        return Ok(Some(Message::Refresh {
+            working_copy_mode: WorkingCopyMode::Ignore,
+        }));
+    }
+
     Ok(None)
 }
 
@@ -453,7 +478,9 @@ fn handle_key(model: &mut Model, key: event::KeyEvent) -> Option<Message> {
         KeyCode::Left | KeyCode::Char('h') => Some(Message::SelectPrevSiblingNode),
         KeyCode::Right | KeyCode::Char('l') => Some(Message::SelectNextSiblingNode),
         KeyCode::Char('K') => Some(Message::SelectParentNode),
-        KeyCode::Char(' ') | KeyCode::Backspace => Some(Message::Refresh),
+        KeyCode::Char(' ') | KeyCode::Backspace => Some(Message::Refresh {
+            working_copy_mode: WorkingCopyMode::Snapshot,
+        }),
         KeyCode::Tab => Some(Message::ToggleLogListFold),
         KeyCode::Esc => Some(Message::Clear),
         KeyCode::Char('@') => Some(Message::SelectCurrentWorkingCopy),
@@ -484,7 +511,7 @@ fn handle_msg(term: Term, model: &mut Model, msg: Message) -> Result<Option<Mess
         // General
         Message::Clear => model.clear(),
         Message::Quit => model.quit(),
-        Message::Refresh => model.refresh()?,
+        Message::Refresh { working_copy_mode } => model.refresh(working_copy_mode)?,
         Message::SetRevset { mode } => model.set_revset(mode),
         Message::SubmitTextInput => return model.submit_text_input(term),
         Message::ShowHelp => model.show_help(),

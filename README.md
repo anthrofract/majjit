@@ -27,6 +27,7 @@ Once you run the program you can press `?` to show the help info. Most of the co
 - Output from jj commands is displayed in the bottom panel.
 - Fuzzy matching for various features like selecting changes or bookmarks.
 - Mouse support: left click to select, right click to toggle folding, and scroll wheel to scroll.
+- Live refreshing on file changes when watchman is on path.
 
 ## Supported jj commands
 

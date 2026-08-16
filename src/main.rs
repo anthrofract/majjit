@@ -5,6 +5,7 @@ mod shell_out;
 mod terminal;
 mod update;
 mod view;
+mod watchman;
 
 use crate::model::{Model, State};
 use crate::update::update;
@@ -15,6 +16,7 @@ use clap::Parser;
 use model::DEFAULT_REVSET;
 use shell_out::JjCommand;
 use terminal::Term;
+use watchman::WatchmanMonitor;
 
 #[derive(Parser, Debug)]
 #[command(version, about = "Majjit: A TUI to manipulate the Jujutsu DAG")]
@@ -42,19 +44,20 @@ fn run() -> Result<()> {
     let repository = JjCommand::jj_ensure_valid_repo(&args.repository)?;
     let terminal = terminal::init_terminal()?;
     let model = Model::new(
-        repository,
+        repository.clone(),
         args.revisions,
         terminal::detect_terminal_theme()?,
     )?;
-    let result = tui_loop(model, terminal.clone());
+    let watchman = WatchmanMonitor::start(repository)?;
+    let result = tui_loop(model, terminal.clone(), watchman);
     terminal::relinquish_terminal()?;
     result
 }
 
-fn tui_loop(mut model: Model, terminal: Term) -> Result<()> {
+fn tui_loop(mut model: Model, terminal: Term, watchman: Option<WatchmanMonitor>) -> Result<()> {
     while model.state != State::Quit {
         terminal.borrow_mut().draw(|f| view(&mut model, f))?;
-        update(terminal.clone(), &mut model)?;
+        update(terminal.clone(), &mut model, watchman.as_ref())?;
     }
     Ok(())
 }

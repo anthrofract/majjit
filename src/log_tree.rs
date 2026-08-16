@@ -1,5 +1,5 @@
 use crate::model::GlobalArgs;
-use crate::shell_out::JjCommand;
+use crate::shell_out::{JjCommand, WorkingCopyMode};
 use ansi_to_tui::IntoText;
 use anyhow::{Error, Result, anyhow, bail};
 use ratatui::{
@@ -21,8 +21,13 @@ impl JjLog {
         })
     }
 
-    pub fn load_log_tree(&mut self, global_args: &GlobalArgs, revset: &str) -> Result<()> {
-        self.log_tree = CommitOrText::load_all(global_args, revset)?;
+    pub fn load_log_tree(
+        &mut self,
+        global_args: &GlobalArgs,
+        revset: &str,
+        working_copy_mode: WorkingCopyMode,
+    ) -> Result<()> {
+        self.log_tree = CommitOrText::load_all(global_args, revset, working_copy_mode)?;
         Ok(())
     }
 
@@ -158,8 +163,12 @@ pub enum CommitOrText {
 }
 
 impl CommitOrText {
-    fn load_all(global_args: &GlobalArgs, revset: &str) -> Result<Vec<Self>> {
-        let output = JjCommand::jj_log(revset, global_args.clone()).run()?;
+    fn load_all(
+        global_args: &GlobalArgs,
+        revset: &str,
+        working_copy_mode: WorkingCopyMode,
+    ) -> Result<Vec<Self>> {
+        let output = JjCommand::jj_log(revset, global_args.clone(), working_copy_mode).run()?;
         let mut lines = output.trim().lines().peekable();
         if lines.peek().is_none() {
             bail!("Revset '{revset}' is empty");

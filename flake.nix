@@ -42,6 +42,11 @@
           version = "0.1.0";
           src = self;
           cargoLock.lockFile = ./Cargo.lock;
+          nativeBuildInputs = [ pkgs.makeWrapper ];
+          postInstall = ''
+            wrapProgram $out/bin/majjit \
+              --prefix PATH : ${pkgs.lib.makeBinPath [ pkgs.watchman ]}
+          '';
         };
     in
     {
@@ -69,6 +74,7 @@
               pkgs.git
               pkgs.just
               pkgs.jujutsu
+              pkgs.watchman
             ];
           };
         }
