@@ -111,10 +111,7 @@ impl CommandTree {
         let mut node = &self.0;
 
         for key_code in key_codes {
-            let children = match &node.children {
-                None => return None,
-                Some(children) => children,
-            };
+            let children = node.children.as_ref()?;
             node = children.get_node(key_code)?;
         }
 
@@ -125,10 +122,7 @@ impl CommandTree {
         let mut node = &mut self.0;
 
         for key_code in key_codes {
-            let children = match &mut node.children {
-                None => return None,
-                Some(children) => children,
-            };
+            let children = node.children.as_mut()?;
             node = children.get_node_mut(key_code)?;
         }
 

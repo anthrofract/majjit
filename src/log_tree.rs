@@ -319,7 +319,8 @@ fn split_line1(line1: &str) -> Result<(String, [String; COMMIT_NUM_FIELDS], Stri
     let fields: [&str; COMMIT_NUM_FIELDS] = parts
         .get(1..=COMMIT_NUM_FIELDS)
         .filter(|_| parts.len() == COMMIT_NUM_FIELDS + 2)
-        .and_then(|fs| fs.try_into().ok())
+        .and_then(|fields| fields.as_array())
+        .copied()
         .ok_or_else(|| {
             anyhow!(
                 "Commit marker block has {} fields, expected {}: {marker_block_clean:?}",

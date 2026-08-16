@@ -2,20 +2,20 @@
 name = "majjit"
 version = "0.1.0"
 edition = "2024"
-rust-version = "1.91.1"
+rust-version = "1.95.0"
 
 [dependencies]
 ansi-to-tui = "8.0.1"
-anyhow = "1.0.101"
-clap = { version = "4.5.57", features = ["derive"] }
+anyhow = "1.0.104"
+clap = { version = "4.6.6", features = ["derive"] }
 crossterm = "0.29.0"
 fuzzy-matcher = "0.3.7"
-indexmap = "2.13.0"
-ratatui = "0.30.0"
-ratatui-textarea = "0.8.0"
-regex = "1.12.3"
-shell-words = "1.1.0"
-tempfile = "3.14.0"
+indexmap = "2.14.0"
+ratatui = "0.30.2"
+ratatui-textarea = "0.9.2"
+regex = "1.13.1"
+shell-words = "1.1.1"
+tempfile = "3.27.0"
 terminal-colorsaurus = "1.0.3"
 
 [profile.release]
