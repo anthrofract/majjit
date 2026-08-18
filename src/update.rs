@@ -102,6 +102,7 @@ pub enum Message {
     Refresh {
         working_copy_mode: WorkingCopyMode,
     },
+    RefreshIfWorkingCopyChanged,
     Resolve,
     Restore {
         mode: RestoreMode,
@@ -382,22 +383,31 @@ pub enum ViewMode {
 pub fn update(terminal: Term, model: &mut Model, watchman: Option<&WatchmanMonitor>) -> Result<()> {
     model.process_jj_command_queue()?;
 
-    let mut current_msg = handle_event(model, watchman)?;
-    while let Some(msg) = current_msg {
-        match handle_msg(terminal.clone(), model, msg) {
-            Ok(next_msg) => current_msg = next_msg,
-            Err(err) => return model.handle_error(err),
-        }
+    if let Some(msg) = poll_watchman_event(model, watchman)? {
+        handle_msg(terminal.clone(), model, msg)?;
+    }
+    if let Some(msg) = poll_terminal_event(model)? {
+        handle_msg(terminal, model, msg)?;
     }
 
     Ok(())
 }
 
-fn handle_event(model: &mut Model, watchman: Option<&WatchmanMonitor>) -> Result<Option<Message>> {
-    if let Some(msg) = poll_watchman_refresh(model, watchman)? {
-        return Ok(Some(msg));
+fn poll_watchman_event(
+    model: &Model,
+    watchman: Option<&WatchmanMonitor>,
+) -> Result<Option<Message>> {
+    if let Some(watchman) = watchman
+        && !model.has_queued_jj_commands()
+        && watchman.take_change()?
+    {
+        return Ok(Some(Message::RefreshIfWorkingCopyChanged));
     }
 
+    Ok(None)
+}
+
+fn poll_terminal_event(model: &mut Model) -> Result<Option<Message>> {
     if event::poll(EVENT_POLL_DURATION)? {
         match event::read()? {
             Event::Key(key) if key.kind == event::KeyEventKind::Press => {
@@ -409,23 +419,6 @@ fn handle_event(model: &mut Model, watchman: Option<&WatchmanMonitor>) -> Result
             _ => {}
         }
     }
-    Ok(None)
-}
-
-fn poll_watchman_refresh(
-    model: &Model,
-    watchman: Option<&WatchmanMonitor>,
-) -> Result<Option<Message>> {
-    if let Some(watchman) = watchman
-        && !model.has_queued_jj_commands()
-        && watchman.take_change()?
-        && model.snapshot_working_copy_changed()?
-    {
-        return Ok(Some(Message::Refresh {
-            working_copy_mode: WorkingCopyMode::Ignore,
-        }));
-    }
-
     Ok(None)
 }
 
@@ -506,130 +499,181 @@ fn handle_mouse(mouse: event::MouseEvent) -> Option<Message> {
     }
 }
 
-fn handle_msg(term: Term, model: &mut Model, msg: Message) -> Result<Option<Message>> {
-    match msg {
+fn handle_msg(term: Term, model: &mut Model, msg: Message) -> Result<()> {
+    let result = match msg {
         // General
-        Message::Clear => model.clear(),
-        Message::Quit => model.quit(),
-        Message::Refresh { working_copy_mode } => model.refresh(working_copy_mode)?,
-        Message::SetRevset { mode } => model.set_revset(mode),
-        Message::SubmitTextInput => return model.submit_text_input(term),
-        Message::ShowHelp => model.show_help(),
-        Message::ToggleIgnoreImmutable => model.toggle_ignore_immutable(),
+        Message::Clear => {
+            model.clear();
+            Ok(())
+        }
+        Message::Quit => {
+            model.quit();
+            Ok(())
+        }
+        Message::Refresh { working_copy_mode } => model.refresh(working_copy_mode),
+        Message::RefreshIfWorkingCopyChanged => model.refresh_if_working_copy_changed(),
+        Message::SetRevset { mode } => {
+            model.set_revset(mode);
+            Ok(())
+        }
+        Message::SubmitTextInput => model.submit_text_input(term),
+        Message::ShowHelp => {
+            model.show_help();
+            Ok(())
+        }
+        Message::ToggleIgnoreImmutable => {
+            model.toggle_ignore_immutable();
+            Ok(())
+        }
 
         // Navigation
-        Message::ScrollDownPage => model.scroll_down_page(),
-        Message::ScrollUpPage => model.scroll_up_page(),
-        Message::SelectByBookmark => model.select_by_bookmark(),
-        Message::SelectByDescription => model.select_by_description(),
-        Message::SelectByTag => model.select_by_tag(),
-        Message::SelectCurrentWorkingCopy => model.select_current_working_copy(),
-        Message::SelectInRevset => model.select_in_revset(),
-        Message::SelectNextNode => model.select_next_node(),
-        Message::SelectNextSiblingNode => model.select_current_next_sibling_node()?,
-        Message::SelectParentNode => model.select_parent_node()?,
-        Message::SelectPrevNode => model.select_prev_node(),
-        Message::SelectPrevSiblingNode => model.select_current_prev_sibling_node()?,
-        Message::ToggleLogListFold => model.toggle_current_fold()?,
+        Message::ScrollDownPage => {
+            model.scroll_down_page();
+            Ok(())
+        }
+        Message::ScrollUpPage => {
+            model.scroll_up_page();
+            Ok(())
+        }
+        Message::SelectByBookmark => {
+            model.select_by_bookmark();
+            Ok(())
+        }
+        Message::SelectByDescription => {
+            model.select_by_description();
+            Ok(())
+        }
+        Message::SelectByTag => {
+            model.select_by_tag();
+            Ok(())
+        }
+        Message::SelectCurrentWorkingCopy => {
+            model.select_current_working_copy();
+            Ok(())
+        }
+        Message::SelectInRevset => {
+            model.select_in_revset();
+            Ok(())
+        }
+        Message::SelectNextNode => {
+            model.select_next_node();
+            Ok(())
+        }
+        Message::SelectNextSiblingNode => model.select_current_next_sibling_node(),
+        Message::SelectParentNode => model.select_parent_node(),
+        Message::SelectPrevNode => {
+            model.select_prev_node();
+            Ok(())
+        }
+        Message::SelectPrevSiblingNode => model.select_current_prev_sibling_node(),
+        Message::ToggleLogListFold => model.toggle_current_fold(),
 
         // Mouse
-        Message::LeftMouseClick { row, column } => model.handle_mouse_click(row, column),
+        Message::LeftMouseClick { row, column } => {
+            model.handle_mouse_click(row, column);
+            Ok(())
+        }
         Message::RightMouseClick { row, column } => {
             model.handle_mouse_click(row, column);
-            model.toggle_current_fold()?;
+            model.toggle_current_fold()
         }
-        Message::ScrollDown => model.scroll_down_once(),
-        Message::ScrollUp => model.scroll_up_once(),
+        Message::ScrollDown => {
+            model.scroll_down_once();
+            Ok(())
+        }
+        Message::ScrollUp => {
+            model.scroll_up_once();
+            Ok(())
+        }
 
         // Commands
-        Message::Abandon { mode } => model.jj_abandon(mode)?,
-        Message::Absorb { mode } => model.jj_absorb(mode)?,
-        Message::BookmarkCreate => model.jj_bookmark_create()?,
-        Message::BookmarkDelete => model.jj_bookmark_delete()?,
-        Message::BookmarkForget { include_remotes } => model.jj_bookmark_forget(include_remotes)?,
-        Message::BookmarkAdvance => model.jj_bookmark_advance()?,
-        Message::BookmarkListAll => model.jj_bookmark_list_all()?,
-        Message::BookmarkListLocal => model.jj_bookmark_list_local()?,
-        Message::BookmarkListTracked => model.jj_bookmark_list_tracked()?,
-        Message::BookmarkListUntracked => model.jj_bookmark_list_untracked()?,
-        Message::BookmarkListConflicted => model.jj_bookmark_list_conflicted()?,
-        Message::BookmarkMove { mode } => model.jj_bookmark_move(mode)?,
-        Message::BookmarkRename => model.jj_bookmark_rename()?,
-        Message::BookmarkSet { mode } => model.jj_bookmark_set(mode)?,
-        Message::BookmarkTrack => model.jj_bookmark_track()?,
-        Message::BookmarkUntrack => model.jj_bookmark_untrack()?,
-        Message::Commit => model.jj_commit(term)?,
-        Message::Custom => model.jj_custom()?,
-        Message::Describe => model.jj_describe(term)?,
-        Message::DescribeInline => model.start_describe_input()?,
+        Message::Abandon { mode } => model.jj_abandon(mode),
+        Message::Absorb { mode } => model.jj_absorb(mode),
+        Message::BookmarkCreate => model.jj_bookmark_create(),
+        Message::BookmarkDelete => model.jj_bookmark_delete(),
+        Message::BookmarkForget { include_remotes } => model.jj_bookmark_forget(include_remotes),
+        Message::BookmarkAdvance => model.jj_bookmark_advance(),
+        Message::BookmarkListAll => model.jj_bookmark_list_all(),
+        Message::BookmarkListLocal => model.jj_bookmark_list_local(),
+        Message::BookmarkListTracked => model.jj_bookmark_list_tracked(),
+        Message::BookmarkListUntracked => model.jj_bookmark_list_untracked(),
+        Message::BookmarkListConflicted => model.jj_bookmark_list_conflicted(),
+        Message::BookmarkMove { mode } => model.jj_bookmark_move(mode),
+        Message::BookmarkRename => model.jj_bookmark_rename(),
+        Message::BookmarkSet { mode } => model.jj_bookmark_set(mode),
+        Message::BookmarkTrack => model.jj_bookmark_track(),
+        Message::BookmarkUntrack => model.jj_bookmark_untrack(),
+        Message::Commit => model.jj_commit(term),
+        Message::Custom => model.jj_custom(),
+        Message::Describe => model.jj_describe(term),
+        Message::DescribeInline => model.start_describe_input(),
         Message::Duplicate {
             destination_type,
             destination,
-        } => model.jj_duplicate(destination_type, destination)?,
-        Message::Edit => model.jj_edit()?,
-        Message::EditTarget => model.jj_edit_target()?,
-        Message::Evolog { patch } => model.jj_evolog(patch, term)?,
-        Message::FileTrack => model.jj_file_track()?,
-        Message::FileUntrack => model.jj_file_untrack()?,
-        Message::GitFetch { mode } => model.jj_git_fetch(mode)?,
-        Message::GitPush { mode } => model.jj_git_push(mode)?,
-        Message::Interdiff { mode } => model.jj_interdiff(mode, term)?,
-        Message::Metaedit { action } => model.jj_metaedit(action)?,
-        Message::New { mode } => model.jj_new(mode)?,
-        Message::NewAfterTrunkSync => model.jj_new_after_trunk_sync()?,
-        Message::NewAtTarget => model.jj_new_at_target()?,
-        Message::NewRevsets => model.jj_new_revsets()?,
+        } => model.jj_duplicate(destination_type, destination),
+        Message::Edit => model.jj_edit(),
+        Message::EditTarget => model.jj_edit_target(),
+        Message::Evolog { patch } => model.jj_evolog(patch, term),
+        Message::FileTrack => model.jj_file_track(),
+        Message::FileUntrack => model.jj_file_untrack(),
+        Message::GitFetch { mode } => model.jj_git_fetch(mode),
+        Message::GitPush { mode } => model.jj_git_push(mode),
+        Message::Interdiff { mode } => model.jj_interdiff(mode, term),
+        Message::Metaedit { action } => model.jj_metaedit(action),
+        Message::New { mode } => model.jj_new(mode),
+        Message::NewAfterTrunkSync => model.jj_new_after_trunk_sync(),
+        Message::NewAtTarget => model.jj_new_at_target(),
+        Message::NewRevsets => model.jj_new_revsets(),
         Message::NextPrev {
             direction,
             mode,
             offset,
-        } => model.jj_next_prev(direction, mode, offset)?,
-        Message::Open => model.open_file(term)?,
-        Message::Parallelize { source } => model.jj_parallelize(source)?,
+        } => model.jj_next_prev(direction, mode, offset),
+        Message::Open => model.open_file(term),
+        Message::Parallelize { source } => model.jj_parallelize(source),
         Message::Rebase {
             source_type,
             destination_type,
             destination,
-        } => model.jj_rebase(source_type, destination_type, destination)?,
-        Message::RebaseSelectedBranchOntoTrunk => model.jj_rebase_selected_branch_onto_trunk()?,
+        } => model.jj_rebase(source_type, destination_type, destination),
+        Message::RebaseSelectedBranchOntoTrunk => model.jj_rebase_selected_branch_onto_trunk(),
         Message::RebaseSelectedBranchOntoTrunkSync => {
-            model.jj_rebase_selected_branch_onto_trunk_sync()?
+            model.jj_rebase_selected_branch_onto_trunk_sync()
         }
-        Message::RebaseCustom => model.jj_rebase_custom()?,
+        Message::RebaseCustom => model.jj_rebase_custom(),
         Message::RebaseTargetFuzzy {
             source_type,
             destination_type,
-        } => model.jj_rebase_target_fuzzy(source_type, destination_type)?,
-        Message::Redo => model.jj_redo()?,
-        Message::Resolve => model.jj_resolve(term)?,
-        Message::Restore { mode } => model.jj_restore(mode)?,
+        } => model.jj_rebase_target_fuzzy(source_type, destination_type),
+        Message::Redo => model.jj_redo(),
+        Message::Resolve => model.jj_resolve(term),
+        Message::Restore { mode } => model.jj_restore(mode),
         Message::Revert {
             revision,
             destination_type,
             destination,
-        } => model.jj_revert(revision, destination_type, destination)?,
-        Message::SaveSelection => model.save_selection()?,
-        Message::Sign { action, range } => model.jj_sign(action, range)?,
-        Message::SimplifyParents { mode } => model.jj_simplify_parents(mode)?,
-        Message::Squash { mode } => model.jj_squash(mode, term)?,
+        } => model.jj_revert(revision, destination_type, destination),
+        Message::SaveSelection => model.save_selection(),
+        Message::Sign { action, range } => model.jj_sign(action, range),
+        Message::SimplifyParents { mode } => model.jj_simplify_parents(mode),
+        Message::Squash { mode } => model.jj_squash(mode, term),
         Message::Split {
             destination_type,
             destination,
             parallel,
-        } => model.jj_split(destination_type, destination, parallel, term)?,
-        Message::SplitCustom => model.jj_split_custom()?,
-        Message::Status => model.jj_status(term)?,
-        Message::Undo => model.jj_undo()?,
-        Message::View { mode } => model.jj_view(mode, term)?,
-        Message::WorkspaceAddPathOnly => model.jj_workspace_add_path_only()?,
-        Message::WorkspaceAddNamed => model.jj_workspace_add_named()?,
-        Message::WorkspaceForgetAtSelection => model.jj_workspace_forget_at_selection()?,
-        Message::WorkspaceForgetCurrent => model.jj_workspace_forget_current()?,
-        Message::WorkspaceForgetFuzzy => model.jj_workspace_forget_fuzzy()?,
-        Message::WorkspaceList => model.jj_workspace_list()?,
-        Message::WorkspaceRename => model.jj_workspace_rename()?,
-        Message::WorkspaceUpdateStale => model.jj_workspace_update_stale()?,
+        } => model.jj_split(destination_type, destination, parallel, term),
+        Message::SplitCustom => model.jj_split_custom(),
+        Message::Status => model.jj_status(term),
+        Message::Undo => model.jj_undo(),
+        Message::View { mode } => model.jj_view(mode, term),
+        Message::WorkspaceAddPathOnly => model.jj_workspace_add_path_only(),
+        Message::WorkspaceAddNamed => model.jj_workspace_add_named(),
+        Message::WorkspaceForgetAtSelection => model.jj_workspace_forget_at_selection(),
+        Message::WorkspaceForgetCurrent => model.jj_workspace_forget_current(),
+        Message::WorkspaceForgetFuzzy => model.jj_workspace_forget_fuzzy(),
+        Message::WorkspaceList => model.jj_workspace_list(),
+        Message::WorkspaceRename => model.jj_workspace_rename(),
+        Message::WorkspaceUpdateStale => model.jj_workspace_update_stale(),
     };
-
-    Ok(None)
+    result.or_else(|err| model.handle_error(err))
 }

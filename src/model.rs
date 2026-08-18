@@ -262,7 +262,14 @@ impl Model {
         Ok(())
     }
 
-    pub fn snapshot_working_copy_changed(&self) -> Result<bool> {
+    pub fn refresh_if_working_copy_changed(&mut self) -> Result<()> {
+        if self.snapshot_working_copy_changed()? {
+            self.refresh(WorkingCopyMode::Ignore)?;
+        }
+        Ok(())
+    }
+
+    fn snapshot_working_copy_changed(&self) -> Result<bool> {
         let commit_id = JjCommand::jj_current_working_copy_commit_id(
             self.global_args.clone(),
             WorkingCopyMode::Snapshot,
@@ -764,10 +771,10 @@ impl Model {
         });
     }
 
-    pub fn submit_text_input(&mut self, term: Term) -> Result<Option<Message>> {
+    pub fn submit_text_input(&mut self, term: Term) -> Result<()> {
         self.state = State::Running;
         let Some(session) = self.text_input.take() else {
-            return Ok(None);
+            return Ok(());
         };
 
         let maybe_value = match &session.fuzzy {
@@ -800,7 +807,7 @@ impl Model {
         if let Some(value) = maybe_value {
             self.apply_text_input(session.action, value, term)?;
         }
-        Ok(None)
+        Ok(())
     }
 
     pub fn forward_text_input_key(&mut self, key: KeyEvent) {
