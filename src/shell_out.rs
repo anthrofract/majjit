@@ -271,6 +271,17 @@ impl JjCommand {
         Self::new(&args, global_args, None, ReturnOutput::Stdout)
     }
 
+    pub fn jj_diff_stat(change_id: &str, global_args: GlobalArgs) -> Self {
+        let args = [
+            "diff",
+            "--ignore-working-copy",
+            "--stat",
+            "--revisions",
+            change_id,
+        ];
+        Self::new_no_color(&args, global_args, ReturnOutput::Stdout)
+    }
+
     pub fn jj_diff_file(change_id: &str, file: &str, global_args: GlobalArgs) -> Self {
         let args = [
             "diff",

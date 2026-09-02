@@ -215,6 +215,57 @@ impl CommitOrText {
 }
 
 #[derive(Debug)]
+struct DiffStat {
+    files_changed: u64,
+    lines_added: u64,
+    lines_deleted: u64,
+}
+
+impl DiffStat {
+    fn load(global_args: &GlobalArgs, change_id: &str) -> Result<Self> {
+        let diff_stat_re = Regex::new(
+            r"^(?<files>\d+) files? changed, (?<added>\d+) insertions?\(\+\), (?<deleted>\d+) deletions?\(-\)$",
+        )?;
+
+        let output = JjCommand::jj_diff_stat(change_id, global_args.clone()).run()?;
+        let line = output
+            .trim_end()
+            .lines()
+            .next_back()
+            .ok_or_else(|| anyhow!("Diff stat output is empty"))?;
+        let captures = diff_stat_re
+            .captures(line)
+            .ok_or_else(|| anyhow!("Cannot parse diff stat output: {line:?}"))?;
+        Ok(Self {
+            files_changed: captures["files"].parse()?,
+            lines_added: captures["added"].parse()?,
+            lines_deleted: captures["deleted"].parse()?,
+        })
+    }
+
+    fn render(&self, graph_indent: &str) -> Line<'static> {
+        Line::from(vec![
+            Span::raw(graph_indent.to_string()),
+            Span::raw("  "),
+            Span::styled(
+                format!("~{}", self.files_changed),
+                Style::default().fg(Color::White),
+            ),
+            Span::raw(" "),
+            Span::styled(
+                format!("+{}", self.lines_added),
+                Style::default().fg(Color::Green),
+            ),
+            Span::raw(" "),
+            Span::styled(
+                format!("-{}", self.lines_deleted),
+                Style::default().fg(Color::Red),
+            ),
+        ])
+    }
+}
+
+#[derive(Debug)]
 pub struct Commit {
     pub change_id: String,
     pub commit_id: String,
@@ -224,7 +275,7 @@ pub struct Commit {
     pub tags: Vec<String>,
     pub description_first_line: Option<String>,
     _has_conflict: bool,
-    _empty: bool,
+    empty: bool,
     _is_root: bool,
     _email: String,
     _timestamp: String,
@@ -240,6 +291,7 @@ pub struct Commit {
     graph_indent: String,
     unfolded: bool,
     loaded: bool,
+    diff_stat: Option<DiffStat>,
     file_diffs: Vec<FileDiff>,
     flat_log_idx: usize,
 }
@@ -279,7 +331,7 @@ impl Commit {
             commit_id,
             current_working_copy: current_working_copy == "Y",
             _has_conflict: has_conflict == "Y",
-            _empty: empty == "Y",
+            empty: empty == "Y",
             _is_root: is_root == "Y",
             description_first_line: Some(description).filter(|s| !s.is_empty()),
             _email: email,
@@ -294,6 +346,7 @@ impl Commit {
             graph_indent,
             unfolded: false,
             loaded: false,
+            diff_stat: None,
             file_diffs: Vec::new(),
             flat_log_idx: 0,
         })
@@ -387,6 +440,11 @@ impl LogTreeNode for Commit {
             line2.extend(self.line2_ansi.into_text()?.lines[0].spans.clone());
             lines.push(line2);
         };
+        if self.unfolded
+            && let Some(diff_stat) = &self.diff_stat
+        {
+            lines.push(diff_stat.render(&self.graph_indent));
+        }
         Ok(Text::from(lines))
     }
 
@@ -432,7 +490,13 @@ impl LogTreeNode for Commit {
 
         if !self.loaded {
             let file_diffs = FileDiff::load_all(global_args, &self.change_id, &self.graph_indent)?;
+            let diff_stat = if self.empty {
+                None
+            } else {
+                Some(DiffStat::load(global_args, &self.change_id)?)
+            };
             self.file_diffs = file_diffs;
+            self.diff_stat = diff_stat;
             self.loaded = true;
         }
 
