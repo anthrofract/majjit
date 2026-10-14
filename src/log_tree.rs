@@ -798,7 +798,13 @@ impl DiffHunk {
             SearchDirection::Up => diff_hunk_lines.iter().rev().collect(),
         };
         for line in hunk_lines.iter().map(|l| strip_ansi(&l.ansi_string)) {
-            if matches!(line.trim(), "~" | "(binary)" | "(empty)") {
+            let trimmed = line.trim();
+            // Jujutsu can label omitted context with the enclosing declaration.
+            // These lines remain visible, but have no old/new line coordinates.
+            let is_context_marker = trimmed
+                .strip_prefix("...")
+                .is_some_and(|label| label.is_empty() || label.starts_with(char::is_whitespace));
+            if matches!(trimmed, "~" | "(binary)" | "(empty)") || is_context_marker {
                 continue;
             }
             let captures = line_nums_regex
