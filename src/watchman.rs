@@ -4,6 +4,7 @@ use std::{
     process::{Command, Stdio},
     sync::mpsc::{Receiver, SyncSender, TryRecvError, TrySendError, channel, sync_channel},
     thread::{self, JoinHandle},
+    time::Duration,
 };
 
 use anyhow::{Result, anyhow, bail};
@@ -92,14 +93,31 @@ fn watch(
     changes: SyncSender<()>,
     shutdown: oneshot::Receiver<()>,
 ) -> Result<()> {
+    let jj_dir = repository.join(".jj");
+    let repo_path = jj_dir.join("repo");
+    let repo_path = if repo_path.is_file() {
+        // Additional workspaces point at the shared repository rather than
+        // keeping their own operation store.
+        jj_dir.join(std::fs::read_to_string(repo_path)?)
+    } else {
+        repo_path
+    };
+    let operation_heads = repo_path.join("op_heads").join("heads");
     let runtime = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()?;
 
     runtime.block_on(async move {
+        let subscriptions = async {
+            tokio::try_join!(
+                subscribe(repository, changes.clone()),
+                poll_operation_heads(operation_heads, changes),
+            )?;
+            Ok(())
+        };
         tokio::select! {
             _ = shutdown => Ok(()),
-            result = subscribe(repository, changes) => result,
+            result = subscriptions => result,
         }
     })
 }
@@ -109,7 +127,6 @@ async fn subscribe(repository: PathBuf, changes: SyncSender<()>) -> Result<()> {
     let root = client
         .resolve_root(CanonicalPath::canonicalize(repository)?)
         .await?;
-    let clock = client.clock(&root, SyncTimeout::Default).await?;
     let expression = Expr::Not(Box::new(Expr::Any(vec![
         Expr::DirName(DirNameTerm {
             path: ".git".into(),
@@ -120,6 +137,7 @@ async fn subscribe(repository: PathBuf, changes: SyncSender<()>) -> Result<()> {
             depth: None,
         }),
     ])));
+    let clock = client.clock(&root, SyncTimeout::Default).await?;
     let (mut subscription, _) = client
         .subscribe::<NameOnly>(
             &root,
@@ -150,6 +168,27 @@ async fn subscribe(repository: PathBuf, changes: SyncSender<()>) -> Result<()> {
             | SubscriptionData::StateEnter { .. }
             | SubscriptionData::StateLeave { .. } => {}
         }
+    }
+}
+
+async fn poll_operation_heads(operation_heads: PathBuf, changes: SyncSender<()>) -> Result<()> {
+    // Watchman's project watches may skip .jj metadata. Poll only the small
+    // shared head set, without running jj unless that set actually changes.
+    let mut interval = tokio::time::interval(Duration::from_millis(500));
+    interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+    let mut previous = Vec::new();
+    let mut current = Vec::new();
+    loop {
+        interval.tick().await;
+        current.clear();
+        for entry in std::fs::read_dir(&operation_heads)? {
+            current.push(entry?.file_name());
+        }
+        current.sort_unstable();
+        if current != previous && !send_change(&changes) {
+            return Ok(());
+        }
+        std::mem::swap(&mut previous, &mut current);
     }
 }
 

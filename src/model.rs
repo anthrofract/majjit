@@ -152,7 +152,7 @@ pub struct Model {
     saved_file_path: Option<String>,
     saved_tree_position: Option<TreePosition>,
     jj_log: JjLog,
-    working_copy_commit_id: Option<String>,
+    operation_id: Option<String>,
     pub log_list: Vec<Text<'static>>,
     pub log_list_state: ListState,
     log_list_tree_positions: Vec<TreePosition>,
@@ -181,7 +181,7 @@ impl Model {
             saved_change_id: None,
             saved_file_path: None,
             jj_log: JjLog::new()?,
-            working_copy_commit_id: None,
+            operation_id: None,
             log_list: Vec::new(),
             log_list_state: ListState::default(),
             log_list_tree_positions: Vec::new(),
@@ -222,25 +222,25 @@ impl Model {
     }
 
     fn sync_with_working_copy_mode(&mut self, working_copy_mode: WorkingCopyMode) -> Result<()> {
+        let operation_id = self.current_operation_id(working_copy_mode)?;
         self.jj_log
-            .load_log_tree(&self.global_args, &self.revset, working_copy_mode)?;
-        self.sync_working_copy_commit_id()?;
+            .load_log_tree(&self.global_args, &self.revset, WorkingCopyMode::Ignore)?;
         self.sync_log_list()?;
         self.reset_log_list_selection()?;
+        // Capture the operation before loading the log so a concurrent external
+        // operation cannot be mistaken for one already displayed.
+        self.operation_id = Some(operation_id);
         Ok(())
     }
 
-    fn sync_working_copy_commit_id(&mut self) -> Result<()> {
-        self.working_copy_commit_id = Some(
-            JjCommand::jj_current_working_copy_commit_id(
-                self.global_args.clone(),
-                WorkingCopyMode::Ignore,
-            )
+    fn current_operation_id(&self, working_copy_mode: WorkingCopyMode) -> Result<String> {
+        if working_copy_mode == WorkingCopyMode::Snapshot {
+            JjCommand::jj_snapshot(self.global_args.clone()).run()?;
+        }
+        Ok(JjCommand::jj_current_operation_id(self.global_args.clone())
             .run()?
             .trim()
-            .to_string(),
-        );
-        Ok(())
+            .to_string())
     }
 
     fn sync_log_list(&mut self) -> Result<()> {
@@ -262,20 +262,12 @@ impl Model {
         Ok(())
     }
 
-    pub fn refresh_if_working_copy_changed(&mut self) -> Result<()> {
-        if self.snapshot_working_copy_changed()? {
+    pub fn refresh_if_repository_changed(&mut self) -> Result<()> {
+        let operation_id = self.current_operation_id(WorkingCopyMode::Snapshot)?;
+        if self.operation_id.as_deref() != Some(operation_id.as_str()) {
             self.refresh(WorkingCopyMode::Ignore)?;
         }
         Ok(())
-    }
-
-    fn snapshot_working_copy_changed(&self) -> Result<bool> {
-        let commit_id = JjCommand::jj_current_working_copy_commit_id(
-            self.global_args.clone(),
-            WorkingCopyMode::Snapshot,
-        )
-        .run()?;
-        Ok(self.working_copy_commit_id.as_deref() != Some(commit_id.trim()))
     }
 
     pub fn has_queued_jj_commands(&self) -> bool {

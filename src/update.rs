@@ -102,7 +102,7 @@ pub enum Message {
     Refresh {
         working_copy_mode: WorkingCopyMode,
     },
-    RefreshIfWorkingCopyChanged,
+    RefreshIfRepositoryChanged,
     Resolve,
     Restore {
         mode: RestoreMode,
@@ -401,7 +401,7 @@ fn poll_watchman_event(
         && !model.has_queued_jj_commands()
         && watchman.take_change()?
     {
-        return Ok(Some(Message::RefreshIfWorkingCopyChanged));
+        return Ok(Some(Message::RefreshIfRepositoryChanged));
     }
 
     Ok(None)
@@ -511,7 +511,7 @@ fn handle_msg(term: Term, model: &mut Model, msg: Message) -> Result<()> {
             Ok(())
         }
         Message::Refresh { working_copy_mode } => model.refresh(working_copy_mode),
-        Message::RefreshIfWorkingCopyChanged => model.refresh_if_working_copy_changed(),
+        Message::RefreshIfRepositoryChanged => model.refresh_if_repository_changed(),
         Message::SetRevset { mode } => {
             model.set_revset(mode);
             Ok(())

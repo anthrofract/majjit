@@ -229,22 +229,25 @@ impl JjCommand {
         Self::new(&args, global_args, None, ReturnOutput::Stdout)
     }
 
-    pub fn jj_current_working_copy_commit_id(
-        global_args: GlobalArgs,
-        working_copy_mode: WorkingCopyMode,
-    ) -> Self {
-        let mut args = vec!["log"];
-        if working_copy_mode == WorkingCopyMode::Ignore {
-            args.push("--ignore-working-copy");
-        }
-        args.extend([
-            "--no-graph",
-            "--revisions",
-            "@",
-            "--template",
-            r#"commit_id ++ "\n""#,
-        ]);
-        Self::new_no_color(&args, global_args, ReturnOutput::Stdout)
+    pub fn jj_snapshot(global_args: GlobalArgs) -> Self {
+        Self::new_no_color(&["util", "snapshot"], global_args, ReturnOutput::Stdout)
+    }
+
+    pub fn jj_current_operation_id(global_args: GlobalArgs) -> Self {
+        Self::new_no_color(
+            &[
+                "op",
+                "log",
+                "--ignore-working-copy",
+                "--no-graph",
+                "--limit",
+                "1",
+                "--template",
+                "id",
+            ],
+            global_args,
+            ReturnOutput::Stdout,
+        )
     }
 
     pub fn jj_log_targets(revset: &str, global_args: GlobalArgs) -> Self {
