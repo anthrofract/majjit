@@ -131,15 +131,15 @@ impl CommandTree {
 
     pub fn get_help(&self) -> Text<'static> {
         let nav_help = [
-            ("Tab ", "Toggle folding"),
+            ("Tab        ", "Toggle folding"),
             ("Ctrl-d/PgDn", "Move down page"),
             ("Ctrl-u/PgUp", "Move up page"),
-            ("j/↓ ", "Move down"),
-            ("k/↑ ", "Move up"),
-            ("l/→ ", "Move in & unfold"),
-            ("h/← ", "Move out & fold"),
-            ("H/Shift-←", "Move out without folding"),
-            ("@", "Select @ change"),
+            ("↓/j        ", "Move down"),
+            ("↑/k        ", "Move up"),
+            ("→/l        ", "Move in & unfold"),
+            ("←/h        ", "Move out & fold"),
+            ("Shift-←/H  ", "Move out"),
+            ("@          ", "Select @ change"),
         ]
         .iter()
         .map(|(key, help)| (key.to_string(), help.to_string()))
@@ -2244,17 +2244,23 @@ impl CommandTree {
 }
 
 fn render_help_text(entries: HelpEntries) -> Text<'static> {
-    const COL_WIDTH: usize = 26;
+    const COL_WIDTH: usize = 42;
+    const COL_WIDTH_OVERFLOWED: usize = 21;
     const MAX_ENTRIES_PER_COL: usize = 17;
 
     // Get lines for each column, splitting if over MAX_ENTRIES_PER_COL
-    let columns: Vec<Vec<Line>> = entries
+    let columns: Vec<(usize, Vec<Line>)> = entries
         .into_iter()
         .flat_map(|(group_help_text, help_group)| {
             let chunks: Vec<Vec<(String, String)>> = help_group
                 .chunks(MAX_ENTRIES_PER_COL)
                 .map(|c| c.to_vec())
                 .collect();
+            let col_width = if chunks.len() > 1 {
+                COL_WIDTH_OVERFLOWED
+            } else {
+                COL_WIDTH
+            };
 
             chunks.into_iter().enumerate().map(move |(i, chunk)| {
                 let mut col_lines = Vec::new();
@@ -2265,35 +2271,33 @@ fn render_help_text(entries: HelpEntries) -> Text<'static> {
                     String::new()
                 };
                 col_lines.push(Line::from(vec![Span::styled(
-                    format!("{header:COL_WIDTH$}"),
+                    header,
                     Style::default().fg(Color::Blue),
                 )]));
                 col_lines.extend(chunk.into_iter().map(|(key, help)| {
-                    let mut num_cols = key.len() + 1 + help.len();
-                    if !key.is_ascii() {
-                        num_cols -= 2;
-                    }
-                    let padding = " ".repeat(COL_WIDTH.saturating_sub(num_cols));
                     Line::from(vec![
                         Span::styled(key, Style::default().fg(Color::Green)),
                         Span::raw(" "),
                         Span::raw(help),
-                        Span::raw(padding),
                     ])
                 }));
-                col_lines
+                for line in &mut col_lines {
+                    let padding = " ".repeat(col_width.saturating_sub(line.width()));
+                    line.spans.push(Span::raw(padding));
+                }
+                (col_width, col_lines)
             })
         })
         .collect();
 
     // Render the columns
-    let num_rows = columns.iter().map(|c| c.len()).max().unwrap();
+    let num_rows = columns.iter().map(|(_, lines)| lines.len()).max().unwrap();
     let lines: Vec<Line> = (0..num_rows)
         .map(|i| {
             let mut spans: Vec<Span> = vec![Span::raw(" ")];
 
-            for col in &columns {
-                let empty_line = Line::from(Span::raw(" ".repeat(COL_WIDTH)));
+            for (col_width, col) in &columns {
+                let empty_line = Line::from(Span::raw(" ".repeat(*col_width)));
                 let col_line = col.get(i).unwrap_or(&empty_line).clone();
                 spans.extend(col_line.spans)
             }
