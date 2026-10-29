@@ -22,7 +22,7 @@ use ratatui::{
     layout::Rect,
     style::Style,
     text::{Line, Text},
-    widgets::ListState,
+    widgets::{List, ListState},
 };
 use ratatui_textarea::{CursorMove, TextArea};
 use terminal_colorsaurus::ThemeMode;
@@ -30,7 +30,7 @@ use terminal_colorsaurus::ThemeMode;
 pub const DEFAULT_REVSET: &str =
     "present(@) | ancestors(immutable_heads().., 32) | remote_bookmarks() | root()";
 
-const LOG_LIST_SCROLL_PADDING: usize = 5;
+pub(crate) const LOG_LIST_SCROLL_PADDING: usize = 5;
 
 #[derive(Default, Debug, PartialEq, Eq)]
 pub enum State {
@@ -44,7 +44,7 @@ pub enum State {
 pub struct TextInputSession {
     pub prompt: String,
     pub textarea: TextArea<'static>,
-    pub action: TextInputAction,
+    action: TextInputAction,
     pub fuzzy: Option<FuzzyFinderState>,
 }
 
@@ -58,11 +58,11 @@ pub struct FuzzyFinderState {
 #[derive(Debug)]
 pub struct FuzzyCandidate {
     pub display: String,
-    pub target: Option<String>,
+    target: Option<String>,
 }
 
 impl FuzzyCandidate {
-    pub fn from_display(display: String) -> Self {
+    fn from_display(display: String) -> Self {
         Self {
             display,
             target: None,
@@ -73,7 +73,7 @@ impl FuzzyCandidate {
 #[derive(Debug)]
 pub struct FilteredCandidate {
     pub candidate_index: usize,
-    pub score: i64,
+    score: i64,
     pub match_positions: Vec<usize>,
 }
 
@@ -147,7 +147,7 @@ pub struct Model {
     pub revset: String,
     pub theme: ThemeMode,
     pub state: State,
-    pub command_tree: CommandTree,
+    command_tree: CommandTree,
     command_keys: Vec<KeyCode>,
     queued_jj_commands: Vec<QueuedJjCommand>,
     accumulated_command_output: Vec<Line<'static>>,
@@ -157,10 +157,10 @@ pub struct Model {
     jj_log: JjLog,
     operation_id: Option<String>,
     pub log_list: Vec<Text<'static>>,
+    pub(crate) log_list_cache: Option<List<'static>>,
     pub log_list_state: ListState,
     log_list_tree_positions: Vec<TreePosition>,
     pub log_list_layout: Rect,
-    pub log_list_scroll_padding: usize,
     pub fuzzy_viewport_height: usize,
     pub info_list: Option<Text<'static>>,
     pub text_input: Option<TextInputSession>,
@@ -186,10 +186,10 @@ impl Model {
             jj_log: JjLog::new()?,
             operation_id: None,
             log_list: Vec::new(),
+            log_list_cache: None,
             log_list_state: ListState::default(),
             log_list_tree_positions: Vec::new(),
             log_list_layout: Rect::ZERO,
-            log_list_scroll_padding: LOG_LIST_SCROLL_PADDING,
             fuzzy_viewport_height: 0,
             info_list: None,
             text_input: None,
@@ -220,7 +220,7 @@ impl Model {
         self.toggle_current_fold()
     }
 
-    pub fn sync(&mut self) -> Result<()> {
+    fn sync(&mut self) -> Result<()> {
         self.sync_with_working_copy_mode(WorkingCopyMode::Snapshot)
     }
 
@@ -248,6 +248,7 @@ impl Model {
 
     fn sync_log_list(&mut self) -> Result<()> {
         (self.log_list, self.log_list_tree_positions) = self.jj_log.flatten_log()?;
+        self.log_list_cache = None;
         Ok(())
     }
 
@@ -722,7 +723,9 @@ impl Model {
         self.state = State::Running;
         self.text_input = None;
         self.info_list = None;
-        self.saved_tree_position = None;
+        if self.saved_tree_position.take().is_some() {
+            self.log_list_cache = None;
+        }
         self.saved_change_id = None;
         self.saved_file_path = None;
         self.command_keys.clear();
@@ -1178,7 +1181,7 @@ impl Model {
     }
 
     pub fn scroll_down_once(&mut self) {
-        if self.log_selected() <= self.log_offset() + self.log_list_scroll_padding {
+        if self.log_selected() <= self.log_offset() + LOG_LIST_SCROLL_PADDING {
             self.select_next_node();
         }
         *self.log_list_state.offset_mut() = self.log_offset() + 1;
@@ -1193,7 +1196,7 @@ impl Model {
             self.log_offset(),
             &ScrollDirection::Down,
         );
-        if self.log_selected() >= last_node_visible - 1 - self.log_list_scroll_padding {
+        if self.log_selected() >= last_node_visible - 1 - LOG_LIST_SCROLL_PADDING {
             self.select_prev_node();
         }
         *self.log_list_state.offset_mut() = self.log_offset().saturating_sub(1);
@@ -1290,7 +1293,11 @@ impl Model {
         };
         self.saved_change_id = Some(change_id.to_string());
         self.saved_file_path = self.get_selected_file_path().map(String::from);
-        self.saved_tree_position = Some(self.get_selected_tree_position());
+        let tree_position = self.get_selected_tree_position();
+        if self.saved_tree_position.as_ref() != Some(&tree_position) {
+            self.saved_tree_position = Some(tree_position);
+            self.log_list_cache = None;
+        }
 
         Ok(())
     }

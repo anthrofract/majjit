@@ -1,10 +1,10 @@
-use crate::model::{Model, State, TextInputSession};
+use crate::model::{LOG_LIST_SCROLL_PADDING, Model, State, TextInputSession};
 
 use ratatui::{
     Frame,
     layout::{Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
-    text::{Line, Span},
+    text::{Line, Span, Text},
     widgets::{Block, Borders, List, Paragraph},
 };
 use terminal_colorsaurus::ThemeMode;
@@ -26,10 +26,15 @@ fn saved_selection_color(terminal_theme_mode: ThemeMode) -> Color {
 }
 
 pub fn view(model: &mut Model, frame: &mut Frame) {
-    let header = render_header(model);
-    let log_list = render_log_list(model);
+    let saved_indices = model.get_saved_selection_flat_log_idxs();
     let layout = render_layout(model, frame.area());
-    frame.render_widget(header, layout[0]);
+    frame.render_widget(render_header(model), layout[0]);
+    let log_list = cached_log_list(
+        &mut model.log_list_cache,
+        &model.log_list,
+        saved_indices,
+        model.theme,
+    );
     frame.render_stateful_widget(log_list, layout[1], &mut model.log_list_state);
     model.log_list_layout = layout[1];
     if model.state == State::EnteringText {
@@ -83,29 +88,24 @@ fn render_header(model: &Model) -> Paragraph<'_> {
     Paragraph::new(Line::from(header_spans))
 }
 
-fn render_log_list(model: &Model) -> List<'static> {
-    let mut log_items = model.log_list.clone();
-    apply_saved_selection_highlights(model, &mut log_items);
-    List::new(log_items)
-        .highlight_style(Style::new().bold().bg(selection_color(model.theme)))
-        .scroll_padding(model.log_list_scroll_padding)
-}
-
-fn apply_saved_selection_highlights(model: &Model, log_items: &mut [ratatui::text::Text<'static>]) {
-    let saved_selection_color = saved_selection_color(model.theme);
-    let (saved_commit_idx, saved_file_diff_idx) = model.get_saved_selection_flat_log_idxs();
-
-    if let Some(idx) = saved_commit_idx
-        && let Some(item) = log_items.get_mut(idx)
-    {
-        apply_saved_selection_highlight(item, saved_selection_color);
-    }
-
-    if let Some(idx) = saved_file_diff_idx
-        && let Some(item) = log_items.get_mut(idx)
-    {
-        apply_saved_selection_highlight(item, saved_selection_color);
-    }
+// The model invalidates this list when canonical content or saved selection changes.
+fn cached_log_list<'a>(
+    cache: &'a mut Option<List<'static>>,
+    log_items: &[Text<'static>],
+    saved_indices: (Option<usize>, Option<usize>),
+    theme: ThemeMode,
+) -> &'a List<'static> {
+    cache.get_or_insert_with(|| {
+        let mut log_items = log_items.to_vec();
+        for idx in [saved_indices.0, saved_indices.1].into_iter().flatten() {
+            if let Some(item) = log_items.get_mut(idx) {
+                apply_saved_selection_highlight(item, saved_selection_color(theme));
+            }
+        }
+        List::new(log_items)
+            .highlight_style(Style::new().bold().bg(selection_color(theme)))
+            .scroll_padding(LOG_LIST_SCROLL_PADDING)
+    })
 }
 
 fn apply_saved_selection_highlight(text: &mut ratatui::text::Text<'static>, color: Color) {

@@ -30,7 +30,7 @@ impl CommandTreeNodeChildren {
         }
     }
 
-    pub fn get_node(&self, key_code: &KeyCode) -> Option<&CommandTreeNode> {
+    fn get_node(&self, key_code: &KeyCode) -> Option<&CommandTreeNode> {
         self.nodes.get(key_code)
     }
 
@@ -73,21 +73,21 @@ pub struct CommandTreeNode {
 }
 
 impl CommandTreeNode {
-    pub fn new_children() -> Self {
+    fn new_children() -> Self {
         Self {
             children: Some(CommandTreeNodeChildren::new()),
             action: None,
         }
     }
 
-    pub fn new_action(action: Message) -> Self {
+    fn new_action(action: Message) -> Self {
         Self {
             children: None,
             action: Some(action),
         }
     }
 
-    pub fn new_action_with_children(action: Message) -> Self {
+    fn new_action_with_children(action: Message) -> Self {
         let mut node = Self::new_children();
         node.action = Some(action);
         node

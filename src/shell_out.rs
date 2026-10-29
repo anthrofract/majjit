@@ -241,7 +241,7 @@ impl From<JjCommand> for QueuedJjCommand {
 }
 
 impl InteractiveJjCommand {
-    pub fn run(&self, terminal: &mut Terminal) -> Result<String, JjCommandError> {
+    fn run(&self, terminal: &mut Terminal) -> Result<String, JjCommandError> {
         Ok(self.0.output(self.0.run_interactive(terminal)?))
     }
 
