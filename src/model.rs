@@ -1,6 +1,6 @@
 use crate::{
     command_tree::{CommandTree, display_unbound_error_lines},
-    log_tree::{DIFF_HUNK_LINE_IDX, JjLog, LogTreeNode, TreePosition, get_parent_tree_position},
+    log_tree::{JjLog, LogTreeNode, TreePosition, get_parent_tree_position},
     shell_out::{
         InteractiveJjCommand, JjCommand, JjCommandError, QueuedJjCommand, WorkingCopyMode,
         open_file_in_editor,
@@ -638,76 +638,34 @@ impl Model {
         Ok(())
     }
 
-    pub fn select_current_next_sibling_node(&mut self) -> Result<()> {
+    pub fn move_in(&mut self) -> Result<()> {
         let tree_pos = self.get_selected_tree_position();
-        self.select_next_sibling_node(tree_pos)
-    }
-
-    fn select_next_sibling_node(&mut self, tree_pos: TreePosition) -> Result<()> {
-        let mut tree_pos = tree_pos;
-        if tree_pos.len() == DIFF_HUNK_LINE_IDX + 1 {
-            tree_pos = get_parent_tree_position(&tree_pos).unwrap();
+        let node = self.jj_log.get_tree_node(&tree_pos)?;
+        if node.is_folded() {
+            node.toggle_fold(&self.global_args)?;
+            self.sync_log_list()?;
         }
-        let idx = tree_pos[tree_pos.len() - 1];
 
-        match get_parent_tree_position(&tree_pos) {
-            Some(parent_pos) => {
-                let parent_node = self.jj_log.get_tree_node(&parent_pos)?;
-                let children = parent_node.children();
-
-                if idx == children.len() - 1 {
-                    self.select_next_sibling_node(parent_pos)?;
-                } else {
-                    let sibling_idx = (idx + 1).min(children.len() - 1);
-                    self.log_list_state
-                        .select(Some(children[sibling_idx].flat_log_idx()));
-                }
-            }
-            None => {
-                let sibling_idx = (idx + 1).min(self.jj_log.log_tree.len() - 1);
-                self.log_list_state
-                    .select(Some(self.jj_log.log_tree[sibling_idx].flat_log_idx()));
-            }
-        };
-
+        let child_idx = self.log_selected() + 1;
+        if self
+            .log_list_tree_positions
+            .get(child_idx)
+            .is_some_and(|pos| pos.len() == tree_pos.len() + 1 && pos.starts_with(&tree_pos))
+        {
+            self.log_select(child_idx);
+        }
         Ok(())
     }
 
-    pub fn select_current_prev_sibling_node(&mut self) -> Result<()> {
+    pub fn move_out(&mut self) -> Result<()> {
         let tree_pos = self.get_selected_tree_position();
-        self.select_prev_sibling_node(tree_pos)
-    }
-
-    fn select_prev_sibling_node(&mut self, tree_pos: TreePosition) -> Result<()> {
-        if tree_pos.len() == DIFF_HUNK_LINE_IDX + 1 {
-            let parent_pos = get_parent_tree_position(&tree_pos).unwrap();
-            let parent_node_idx = self.jj_log.get_tree_node(&parent_pos)?.flat_log_idx();
-            self.log_select(parent_node_idx);
-            return Ok(());
+        if let Some(parent_pos) = get_parent_tree_position(&tree_pos) {
+            let parent = self.jj_log.get_tree_node(&parent_pos)?;
+            let parent_idx = parent.flat_log_idx();
+            parent.toggle_fold(&self.global_args)?;
+            self.sync_log_list()?;
+            self.log_select(parent_idx);
         }
-        let idx = tree_pos[tree_pos.len() - 1];
-
-        match get_parent_tree_position(&tree_pos) {
-            Some(parent_pos) => {
-                let parent_node = self.jj_log.get_tree_node(&parent_pos)?;
-                let children = parent_node.children();
-
-                if idx == 0 {
-                    let parent_node_idx = parent_node.flat_log_idx();
-                    self.log_select(parent_node_idx);
-                } else {
-                    let sibling_idx = idx - 1;
-                    self.log_list_state
-                        .select(Some(children[sibling_idx].flat_log_idx()));
-                }
-            }
-            None => {
-                let sibling_idx = idx.saturating_sub(1);
-                self.log_list_state
-                    .select(Some(self.jj_log.log_tree[sibling_idx].flat_log_idx()));
-            }
-        };
-
         Ok(())
     }
 

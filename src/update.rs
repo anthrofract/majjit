@@ -127,10 +127,10 @@ pub enum Message {
     SelectCurrentWorkingCopy,
     SelectInRevset,
     SelectNextNode,
-    SelectNextSiblingNode,
+    MoveIn,
     SelectParentNode,
     SelectPrevNode,
-    SelectPrevSiblingNode,
+    MoveOut,
     SetRevset {
         mode: SetRevsetMode,
     },
@@ -472,10 +472,20 @@ fn handle_key(model: &mut Model, key: event::KeyEvent) -> Option<Message> {
         KeyCode::Up | KeyCode::Char('k') => Some(Message::SelectPrevNode),
         KeyCode::PageDown => Some(Message::ScrollDownPage),
         KeyCode::PageUp => Some(Message::ScrollUpPage),
-        KeyCode::Left | KeyCode::Char('h') => Some(Message::SelectPrevSiblingNode),
-        KeyCode::Right | KeyCode::Char('l') => Some(Message::SelectNextSiblingNode),
-        KeyCode::Char('K') => Some(Message::SelectParentNode),
-        KeyCode::Char(' ') | KeyCode::Backspace => Some(Message::Refresh {
+        KeyCode::Char('d') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+            Some(Message::ScrollDownPage)
+        }
+        KeyCode::Char('u') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+            Some(Message::ScrollUpPage)
+        }
+        KeyCode::Left if key.modifiers.contains(KeyModifiers::SHIFT) => {
+            Some(Message::SelectParentNode)
+        }
+        KeyCode::Left | KeyCode::Char('h') => Some(Message::MoveOut),
+        KeyCode::Right | KeyCode::Char('l') => Some(Message::MoveIn),
+        KeyCode::Char('H') => Some(Message::SelectParentNode),
+        KeyCode::Char(' ') => None,
+        KeyCode::Backspace => Some(Message::Refresh {
             working_copy_mode: WorkingCopyMode::Snapshot,
         }),
         KeyCode::Tab => Some(Message::ToggleLogListFold),
@@ -563,13 +573,13 @@ fn handle_msg(term: &mut Terminal, model: &mut Model, msg: Message) -> Result<()
             model.select_next_node();
             Ok(())
         }
-        Message::SelectNextSiblingNode => model.select_current_next_sibling_node(),
+        Message::MoveIn => model.move_in(),
         Message::SelectParentNode => model.select_parent_node(),
         Message::SelectPrevNode => {
             model.select_prev_node();
             Ok(())
         }
-        Message::SelectPrevSiblingNode => model.select_current_prev_sibling_node(),
+        Message::MoveOut => model.move_out(),
         Message::ToggleLogListFold => model.toggle_current_fold(),
 
         // Mouse

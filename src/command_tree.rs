@@ -132,13 +132,13 @@ impl CommandTree {
     pub fn get_help(&self) -> Text<'static> {
         let nav_help = [
             ("Tab ", "Toggle folding"),
-            ("PgDn", "Move down page"),
-            ("PgUp", "Move up page"),
+            ("Ctrl-d/PgDn", "Move down page"),
+            ("Ctrl-u/PgUp", "Move up page"),
             ("j/↓ ", "Move down"),
             ("k/↑ ", "Move up"),
-            ("l/→ ", "Next sibling"),
-            ("h/← ", "Prev sibling"),
-            ("K", "Select parent"),
+            ("l/→ ", "Move in & unfold"),
+            ("h/← ", "Move out & fold"),
+            ("H/Shift-←", "Move out without folding"),
             ("@", "Select @ change"),
         ]
         .iter()
@@ -146,7 +146,7 @@ impl CommandTree {
         .collect();
 
         let general_help = [
-            ("Spc/Bksp", "Refresh log tree"),
+            ("Bksp", "Refresh log tree"),
             ("Esc", "Clear app state"),
             ("I", "Toggle --ignore-immutable"),
             ("?", "Show help"),

@@ -135,7 +135,9 @@ pub trait LogTreeNode {
         log_list_tree_positions: &mut Vec<TreePosition>,
     ) -> Result<()>;
     fn flat_log_idx(&self) -> usize;
-    fn children(&self) -> Vec<&dyn LogTreeNode>;
+    fn is_folded(&self) -> bool {
+        false
+    }
     fn toggle_fold(&mut self, global_args: &GlobalArgs) -> Result<()>;
 }
 
@@ -143,7 +145,7 @@ pub type TreePosition = Vec<usize>;
 const COMMIT_OR_TEXT_IDX: usize = 0;
 const FILE_DIFF_IDX: usize = 1;
 const DIFF_HUNK_IDX: usize = 2;
-pub const DIFF_HUNK_LINE_IDX: usize = 3;
+const DIFF_HUNK_LINE_IDX: usize = 3;
 
 pub fn get_parent_tree_position(tree_pos: &TreePosition) -> Option<TreePosition> {
     let mut tree_pos = tree_pos.clone();
@@ -203,13 +205,6 @@ impl CommitOrText {
             CommitOrText::InfoText(info_text) => {
                 info_text.flatten(tree_pos, log_list, log_list_tree_positions)
             }
-        }
-    }
-
-    pub fn flat_log_idx(&self) -> usize {
-        match self {
-            CommitOrText::Commit(commit) => commit.flat_log_idx(),
-            CommitOrText::InfoText(info_text) => info_text.flat_log_idx,
         }
     }
 }
@@ -475,11 +470,8 @@ impl LogTreeNode for Commit {
         self.flat_log_idx
     }
 
-    fn children(&self) -> Vec<&dyn LogTreeNode> {
-        self.file_diffs
-            .iter()
-            .map(|fd| fd as &dyn LogTreeNode)
-            .collect()
+    fn is_folded(&self) -> bool {
+        !self.unfolded
     }
 
     fn toggle_fold(&mut self, global_args: &GlobalArgs) -> Result<()> {
@@ -538,10 +530,6 @@ impl LogTreeNode for InfoText {
 
     fn flat_log_idx(&self) -> usize {
         self.flat_log_idx
-    }
-
-    fn children(&self) -> Vec<&dyn LogTreeNode> {
-        Vec::new()
     }
 
     fn toggle_fold(&mut self, _global_args: &GlobalArgs) -> Result<()> {
@@ -680,11 +668,8 @@ impl LogTreeNode for FileDiff {
         self.flat_log_idx
     }
 
-    fn children(&self) -> Vec<&dyn LogTreeNode> {
-        self.diff_hunks
-            .iter()
-            .map(|dh| dh as &dyn LogTreeNode)
-            .collect()
+    fn is_folded(&self) -> bool {
+        !self.unfolded
     }
 
     fn toggle_fold(&mut self, global_args: &GlobalArgs) -> Result<()> {
@@ -945,11 +930,8 @@ impl LogTreeNode for DiffHunk {
         self.flat_log_idx
     }
 
-    fn children(&self) -> Vec<&dyn LogTreeNode> {
-        self.diff_hunk_lines
-            .iter()
-            .map(|hl| hl as &dyn LogTreeNode)
-            .collect()
+    fn is_folded(&self) -> bool {
+        !self.unfolded
     }
 
     fn toggle_fold(&mut self, _global_args: &GlobalArgs) -> Result<()> {
@@ -1007,10 +989,6 @@ impl LogTreeNode for DiffHunkLine {
 
     fn flat_log_idx(&self) -> usize {
         self.flat_log_idx
-    }
-
-    fn children(&self) -> Vec<&dyn LogTreeNode> {
-        Vec::new()
     }
 
     fn toggle_fold(&mut self, _global_args: &GlobalArgs) -> Result<()> {
