@@ -1,7 +1,7 @@
 use crate::{
     model::{Model, State},
     shell_out::WorkingCopyMode,
-    terminal::Term,
+    terminal::Terminal,
     watchman::WatchmanMonitor,
 };
 use anyhow::Result;
@@ -380,11 +380,15 @@ pub enum ViewMode {
     ToSelection,
 }
 
-pub fn update(terminal: Term, model: &mut Model, watchman: Option<&WatchmanMonitor>) -> Result<()> {
-    model.process_jj_command_queue()?;
+pub fn update(
+    terminal: &mut Terminal,
+    model: &mut Model,
+    watchman: Option<&WatchmanMonitor>,
+) -> Result<()> {
+    model.process_jj_command_queue(terminal)?;
 
     if let Some(msg) = poll_watchman_event(model, watchman)? {
-        handle_msg(terminal.clone(), model, msg)?;
+        handle_msg(terminal, model, msg)?;
     }
     if let Some(msg) = poll_terminal_event(model)? {
         handle_msg(terminal, model, msg)?;
@@ -499,7 +503,7 @@ fn handle_mouse(mouse: event::MouseEvent) -> Option<Message> {
     }
 }
 
-fn handle_msg(term: Term, model: &mut Model, msg: Message) -> Result<()> {
+fn handle_msg(term: &mut Terminal, model: &mut Model, msg: Message) -> Result<()> {
     let result = match msg {
         // General
         Message::Clear => {
@@ -516,7 +520,7 @@ fn handle_msg(term: Term, model: &mut Model, msg: Message) -> Result<()> {
             model.set_revset(mode);
             Ok(())
         }
-        Message::SubmitTextInput => model.submit_text_input(term),
+        Message::SubmitTextInput => model.submit_text_input(),
         Message::ShowHelp => {
             model.show_help();
             Ok(())
@@ -603,9 +607,9 @@ fn handle_msg(term: Term, model: &mut Model, msg: Message) -> Result<()> {
         Message::BookmarkSet { mode } => model.jj_bookmark_set(mode),
         Message::BookmarkTrack => model.jj_bookmark_track(),
         Message::BookmarkUntrack => model.jj_bookmark_untrack(),
-        Message::Commit => model.jj_commit(term),
+        Message::Commit => model.jj_commit(),
         Message::Custom => model.jj_custom(),
-        Message::Describe => model.jj_describe(term),
+        Message::Describe => model.jj_describe(),
         Message::DescribeInline => model.start_describe_input(),
         Message::Duplicate {
             destination_type,
@@ -613,12 +617,12 @@ fn handle_msg(term: Term, model: &mut Model, msg: Message) -> Result<()> {
         } => model.jj_duplicate(destination_type, destination),
         Message::Edit => model.jj_edit(),
         Message::EditTarget => model.jj_edit_target(),
-        Message::Evolog { patch } => model.jj_evolog(patch, term),
+        Message::Evolog { patch } => model.jj_evolog(patch),
         Message::FileTrack => model.jj_file_track(),
         Message::FileUntrack => model.jj_file_untrack(),
         Message::GitFetch { mode } => model.jj_git_fetch(mode),
         Message::GitPush { mode } => model.jj_git_push(mode),
-        Message::Interdiff { mode } => model.jj_interdiff(mode, term),
+        Message::Interdiff { mode } => model.jj_interdiff(mode),
         Message::Metaedit { action } => model.jj_metaedit(action),
         Message::New { mode } => model.jj_new(mode),
         Message::NewAfterTrunkSync => model.jj_new_after_trunk_sync(),
@@ -646,7 +650,7 @@ fn handle_msg(term: Term, model: &mut Model, msg: Message) -> Result<()> {
             destination_type,
         } => model.jj_rebase_target_fuzzy(source_type, destination_type),
         Message::Redo => model.jj_redo(),
-        Message::Resolve => model.jj_resolve(term),
+        Message::Resolve => model.jj_resolve(),
         Message::Restore { mode } => model.jj_restore(mode),
         Message::Revert {
             revision,
@@ -656,16 +660,16 @@ fn handle_msg(term: Term, model: &mut Model, msg: Message) -> Result<()> {
         Message::SaveSelection => model.save_selection(),
         Message::Sign { action, range } => model.jj_sign(action, range),
         Message::SimplifyParents { mode } => model.jj_simplify_parents(mode),
-        Message::Squash { mode } => model.jj_squash(mode, term),
+        Message::Squash { mode } => model.jj_squash(mode),
         Message::Split {
             destination_type,
             destination,
             parallel,
-        } => model.jj_split(destination_type, destination, parallel, term),
+        } => model.jj_split(destination_type, destination, parallel),
         Message::SplitCustom => model.jj_split_custom(),
-        Message::Status => model.jj_status(term),
+        Message::Status => model.jj_status(),
         Message::Undo => model.jj_undo(),
-        Message::View { mode } => model.jj_view(mode, term),
+        Message::View { mode } => model.jj_view(mode),
         Message::WorkspaceAddPathOnly => model.jj_workspace_add_path_only(),
         Message::WorkspaceAddNamed => model.jj_workspace_add_named(),
         Message::WorkspaceForgetAtSelection => model.jj_workspace_forget_at_selection(),

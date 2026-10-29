@@ -1,6 +1,6 @@
 use crate::log_tree::COMMIT_FIELD_MARKER;
 use crate::model::GlobalArgs;
-use crate::terminal::{self, Term};
+use crate::terminal::Terminal;
 use anyhow::{Result, anyhow};
 use ratatui::style::{Color, Style};
 use ratatui::text::{Line, Span};
@@ -8,13 +8,24 @@ use regex::Regex;
 use std::{env, io::Read, process::Command};
 
 #[derive(Debug)]
-pub struct JjCommand {
+struct JjCommandSpec {
     args: Vec<String>,
     global_args: GlobalArgs,
-    interactive_term: Option<Term>,
     return_output: ReturnOutput,
-    pub sync: bool,
+    sync: bool,
     color: bool,
+}
+
+#[derive(Debug)]
+pub struct InteractiveJjCommand(JjCommandSpec);
+
+#[derive(Debug)]
+pub struct JjCommand(JjCommandSpec);
+
+#[derive(Debug)]
+pub enum QueuedJjCommand {
+    Interactive(InteractiveJjCommand),
+    NonInteractive(JjCommand),
 }
 
 #[derive(Debug)]
@@ -36,33 +47,21 @@ pub enum WorkingCopyMode {
     Ignore,
 }
 
-impl JjCommand {
-    fn new(
-        args: &[&str],
-        global_args: GlobalArgs,
-        interactive_term: Option<Term>,
-        return_output: ReturnOutput,
-    ) -> Self {
+impl JjCommandSpec {
+    fn new(args: &[&str], global_args: GlobalArgs, return_output: ReturnOutput) -> Self {
         Self {
             args: args.iter().map(|a| a.to_string()).collect(),
             global_args,
-            interactive_term,
             return_output,
             sync: true,
             color: true,
         }
     }
 
-    fn new_skip_sync(
-        args: &[&str],
-        global_args: GlobalArgs,
-        interactive_term: Option<Term>,
-        return_output: ReturnOutput,
-    ) -> Self {
+    fn new_skip_sync(args: &[&str], global_args: GlobalArgs, return_output: ReturnOutput) -> Self {
         Self {
             args: args.iter().map(|a| a.to_string()).collect(),
             global_args,
-            interactive_term,
             return_output,
             sync: false,
             color: true,
@@ -73,14 +72,23 @@ impl JjCommand {
         Self {
             args: args.iter().map(|a| a.to_string()).collect(),
             global_args,
-            interactive_term: None,
             return_output,
             sync: false,
             color: false,
         }
     }
 
-    pub fn to_lines(&self) -> Vec<Line<'static>> {
+    fn new_raw(args: &str, global_args: GlobalArgs) -> Result<Self> {
+        Ok(Self {
+            args: shell_words::split(args)?,
+            global_args,
+            return_output: ReturnOutput::Combined,
+            sync: true,
+            color: true,
+        })
+    }
+
+    fn to_lines(&self) -> Vec<Line<'static>> {
         let line = Line::from(vec![
             Span::styled("❯", Style::default().fg(Color::Yellow)),
             Span::raw(" jj "),
@@ -90,21 +98,17 @@ impl JjCommand {
         vec![line, blank_line]
     }
 
-    pub fn run(&self) -> Result<String, JjCommandError> {
-        let output = match &self.interactive_term {
-            None => self.run_noninteractive(),
-            Some(term) => self.run_interactive(term),
-        }?;
+    fn output(&self, output: JjCommandOutput) -> String {
         match self.return_output {
-            ReturnOutput::Combined => Ok(combine_output(output.stdout, output.stderr)),
-            ReturnOutput::Stdout => Ok(output.stdout),
-            ReturnOutput::Stderr => Ok(output.stderr),
+            ReturnOutput::Combined => combine_output(output.stdout, output.stderr),
+            ReturnOutput::Stdout => output.stdout,
+            ReturnOutput::Stderr => output.stderr,
         }
     }
 
     fn run_noninteractive(&self) -> Result<JjCommandOutput, JjCommandError> {
         let mut command = self.base_command();
-        command.args(self.args.clone());
+        command.args(&self.args);
         let output = command.output().map_err(JjCommandError::new_other)?;
 
         let stderr = String::from_utf8_lossy(&output.stderr).into();
@@ -116,26 +120,27 @@ impl JjCommand {
         }
     }
 
-    fn run_interactive(&self, term: &Term) -> Result<JjCommandOutput, JjCommandError> {
+    fn run_interactive(&self, terminal: &mut Terminal) -> Result<JjCommandOutput, JjCommandError> {
         let mut command = self.base_command();
-        command.args(self.args.clone());
+        command.args(&self.args);
         command.stderr(std::process::Stdio::piped());
 
-        terminal::relinquish_terminal().map_err(JjCommandError::new_other)?;
-
-        let mut child = command.spawn().map_err(JjCommandError::new_other)?;
-        let mut stderr_handle = child
-            .stderr
-            .take()
-            .ok_or_else(|| JjCommandError::new_other(anyhow!("No stderr handle")))?;
-        let mut buf = Vec::new();
-        stderr_handle
-            .read_to_end(&mut buf)
-            .map_err(JjCommandError::new_other)?;
-        let stderr = strip_non_style_ansi(&String::from_utf8_lossy(&buf));
-        let status = child.wait().map_err(JjCommandError::new_other)?;
-
-        terminal::takeover_terminal(term).map_err(JjCommandError::new_other)?;
+        let (status, stderr) = terminal
+            .with_suspended(|| {
+                let mut child = command.spawn().map_err(JjCommandError::new_other)?;
+                let mut stderr_handle = child
+                    .stderr
+                    .take()
+                    .ok_or_else(|| JjCommandError::new_other(anyhow!("No stderr handle")))?;
+                let mut buf = Vec::new();
+                stderr_handle
+                    .read_to_end(&mut buf)
+                    .map_err(JjCommandError::new_other)?;
+                let stderr = strip_non_style_ansi(&String::from_utf8_lossy(&buf));
+                let status = child.wait().map_err(JjCommandError::new_other)?;
+                Ok::<_, JjCommandError>((status, stderr))
+            })
+            .map_err(JjCommandError::new_other)??;
 
         if status.success() {
             Ok(JjCommandOutput {
@@ -197,6 +202,199 @@ impl JjCommand {
 
         command
     }
+}
+
+impl QueuedJjCommand {
+    pub fn run(&self, terminal: &mut Terminal) -> Result<String, JjCommandError> {
+        match self {
+            Self::Interactive(command) => command.run(terminal),
+            Self::NonInteractive(command) => command.run(),
+        }
+    }
+
+    pub fn to_lines(&self) -> Vec<Line<'static>> {
+        self.spec().to_lines()
+    }
+
+    pub fn sync(&self) -> bool {
+        self.spec().sync
+    }
+
+    fn spec(&self) -> &JjCommandSpec {
+        match self {
+            Self::Interactive(command) => &command.0,
+            Self::NonInteractive(command) => &command.0,
+        }
+    }
+}
+
+impl From<InteractiveJjCommand> for QueuedJjCommand {
+    fn from(command: InteractiveJjCommand) -> Self {
+        Self::Interactive(command)
+    }
+}
+
+impl From<JjCommand> for QueuedJjCommand {
+    fn from(command: JjCommand) -> Self {
+        Self::NonInteractive(command)
+    }
+}
+
+impl InteractiveJjCommand {
+    pub fn run(&self, terminal: &mut Terminal) -> Result<String, JjCommandError> {
+        Ok(self.0.output(self.0.run_interactive(terminal)?))
+    }
+
+    pub fn jj_diff_file(change_id: &str, file: &str, global_args: GlobalArgs) -> Self {
+        let args = ["diff", "--revisions", change_id, file];
+        Self(JjCommandSpec::new_skip_sync(
+            &args,
+            global_args,
+            ReturnOutput::Stderr,
+        ))
+    }
+
+    pub fn jj_diff_from_to(
+        from: &str,
+        to: &str,
+        file: Option<&str>,
+        global_args: GlobalArgs,
+    ) -> Self {
+        let mut args = vec!["diff", "--from", from, "--to", to];
+        if let Some(file) = file {
+            args.push(file);
+        }
+        Self(JjCommandSpec::new_skip_sync(
+            &args,
+            global_args,
+            ReturnOutput::Stderr,
+        ))
+    }
+
+    pub fn jj_describe(change_id: &str, global_args: GlobalArgs) -> Self {
+        let args = ["describe", change_id];
+        Self(JjCommandSpec::new(&args, global_args, ReturnOutput::Stderr))
+    }
+
+    pub fn jj_show(change_id: &str, global_args: GlobalArgs) -> Self {
+        let args = ["show", change_id];
+        Self(JjCommandSpec::new_skip_sync(
+            &args,
+            global_args,
+            ReturnOutput::Stderr,
+        ))
+    }
+
+    pub fn jj_status(global_args: GlobalArgs) -> Self {
+        let args = ["status"];
+        Self(JjCommandSpec::new_skip_sync(
+            &args,
+            global_args,
+            ReturnOutput::Stderr,
+        ))
+    }
+
+    pub fn jj_commit(maybe_file_path: Option<&str>, global_args: GlobalArgs) -> Self {
+        let mut args = vec!["commit"];
+        if let Some(file_path) = maybe_file_path {
+            args.push(file_path);
+        }
+        Self(JjCommandSpec::new(&args, global_args, ReturnOutput::Stderr))
+    }
+
+    pub fn jj_raw(args: &str, global_args: GlobalArgs) -> Result<Self> {
+        Ok(Self(JjCommandSpec::new_raw(args, global_args)?))
+    }
+
+    pub fn jj_split(
+        change_id: &str,
+        destination_type: Option<&str>,
+        destination: Option<&str>,
+        parallel: bool,
+        global_args: GlobalArgs,
+    ) -> Self {
+        let mut args = vec!["split", "--revision", change_id];
+        if parallel {
+            args.push("--parallel");
+        }
+        if let (Some(destination_type), Some(destination)) = (destination_type, destination) {
+            args.push(destination_type);
+            args.push(destination);
+        }
+        Self(JjCommandSpec::new(&args, global_args, ReturnOutput::Stderr))
+    }
+
+    pub fn jj_resolve(
+        change_id: &str,
+        maybe_file_path: Option<&str>,
+        global_args: GlobalArgs,
+    ) -> Self {
+        let mut args = vec!["resolve", "-r", change_id];
+        if let Some(file_path) = maybe_file_path {
+            args.push(file_path);
+        }
+        Self(JjCommandSpec::new(&args, global_args, ReturnOutput::Stderr))
+    }
+
+    pub fn jj_squash(
+        change_id: &str,
+        maybe_file_path: Option<&str>,
+        global_args: GlobalArgs,
+    ) -> Self {
+        let mut args = vec!["squash", "--revision", change_id];
+        if let Some(file_path) = maybe_file_path {
+            args.push(file_path);
+        }
+        Self(JjCommandSpec::new(&args, global_args, ReturnOutput::Stderr))
+    }
+
+    pub fn jj_squash_into(
+        from_change_id: &str,
+        into_change_id: &str,
+        maybe_file_path: Option<&str>,
+        global_args: GlobalArgs,
+    ) -> Self {
+        let mut args = vec!["squash", "--from", from_change_id, "--into", into_change_id];
+        if let Some(file_path) = maybe_file_path {
+            args.push(file_path);
+        }
+        Self(JjCommandSpec::new(&args, global_args, ReturnOutput::Stderr))
+    }
+
+    pub fn jj_evolog(change_id: &str, patch: bool, global_args: GlobalArgs) -> Self {
+        let mut args = vec!["evolog", "-r", change_id];
+        if patch {
+            args.push("--patch");
+        }
+        Self(JjCommandSpec::new_skip_sync(
+            &args,
+            global_args,
+            ReturnOutput::Stderr,
+        ))
+    }
+
+    pub fn jj_interdiff(
+        from: &str,
+        to: &str,
+        maybe_file_path: Option<&str>,
+        global_args: GlobalArgs,
+    ) -> Self {
+        let mut args = vec!["interdiff", "--from", from, "--to", to];
+        if let Some(path) = maybe_file_path {
+            args.push(path);
+        }
+        Self(JjCommandSpec::new_skip_sync(
+            &args,
+            global_args,
+            ReturnOutput::Stderr,
+        ))
+    }
+}
+
+impl JjCommand {
+    pub fn run(&self) -> Result<String, JjCommandError> {
+        Ok(self.0.output(self.0.run_noninteractive()?))
+    }
 
     pub fn jj_log(
         revset: &str,
@@ -226,15 +424,19 @@ impl JjCommand {
             args.push("--ignore-working-copy");
         }
         args.extend(["--template", &template, "--revisions", revset]);
-        Self::new(&args, global_args, None, ReturnOutput::Stdout)
+        Self(JjCommandSpec::new(&args, global_args, ReturnOutput::Stdout))
     }
 
     pub fn jj_snapshot(global_args: GlobalArgs) -> Self {
-        Self::new_no_color(&["util", "snapshot"], global_args, ReturnOutput::Stdout)
+        Self(JjCommandSpec::new_no_color(
+            &["util", "snapshot"],
+            global_args,
+            ReturnOutput::Stdout,
+        ))
     }
 
     pub fn jj_current_operation_id(global_args: GlobalArgs) -> Self {
-        Self::new_no_color(
+        Self(JjCommandSpec::new_no_color(
             &[
                 "op",
                 "log",
@@ -247,7 +449,7 @@ impl JjCommand {
             ],
             global_args,
             ReturnOutput::Stdout,
-        )
+        ))
     }
 
     pub fn jj_log_targets(revset: &str, global_args: GlobalArgs) -> Self {
@@ -260,7 +462,11 @@ impl JjCommand {
             r#" ++ working_copies ++ "\n""#,
         );
         let args = vec!["log", "--no-graph", "--revisions", revset, "-T", template];
-        Self::new_no_color(&args, global_args, ReturnOutput::Stdout)
+        Self(JjCommandSpec::new_no_color(
+            &args,
+            global_args,
+            ReturnOutput::Stdout,
+        ))
     }
 
     pub fn jj_diff_summary(change_id: &str, global_args: GlobalArgs) -> Self {
@@ -271,7 +477,7 @@ impl JjCommand {
             "--revisions",
             change_id,
         ];
-        Self::new(&args, global_args, None, ReturnOutput::Stdout)
+        Self(JjCommandSpec::new(&args, global_args, ReturnOutput::Stdout))
     }
 
     pub fn jj_diff_stat(change_id: &str, global_args: GlobalArgs) -> Self {
@@ -282,7 +488,11 @@ impl JjCommand {
             "--revisions",
             change_id,
         ];
-        Self::new_no_color(&args, global_args, ReturnOutput::Stdout)
+        Self(JjCommandSpec::new_no_color(
+            &args,
+            global_args,
+            ReturnOutput::Stdout,
+        ))
     }
 
     pub fn jj_diff_file(change_id: &str, file: &str, global_args: GlobalArgs) -> Self {
@@ -294,36 +504,7 @@ impl JjCommand {
             change_id,
             file,
         ];
-        Self::new(&args, global_args, None, ReturnOutput::Stdout)
-    }
-
-    pub fn jj_diff_file_interactive(
-        change_id: &str,
-        file: &str,
-        global_args: GlobalArgs,
-        term: Term,
-    ) -> Self {
-        let args = ["diff", "--revisions", change_id, file];
-        Self::new_skip_sync(&args, global_args, Some(term), ReturnOutput::Stderr)
-    }
-
-    pub fn jj_diff_from_to_interactive(
-        from: &str,
-        to: &str,
-        file: Option<&str>,
-        global_args: GlobalArgs,
-        term: Term,
-    ) -> Self {
-        let mut args = vec!["diff", "--from", from, "--to", to];
-        if let Some(file) = file {
-            args.push(file);
-        }
-        Self::new_skip_sync(&args, global_args, Some(term), ReturnOutput::Stderr)
-    }
-
-    pub fn jj_describe(change_id: &str, global_args: GlobalArgs, term: Term) -> Self {
-        let args = ["describe", change_id];
-        Self::new(&args, global_args, Some(term), ReturnOutput::Stderr)
+        Self(JjCommandSpec::new(&args, global_args, ReturnOutput::Stdout))
     }
 
     pub fn jj_describe_with_message(
@@ -332,7 +513,7 @@ impl JjCommand {
         global_args: GlobalArgs,
     ) -> Self {
         let args = ["describe", change_id, "-m", message];
-        Self::new(&args, global_args, None, ReturnOutput::Stderr)
+        Self(JjCommandSpec::new(&args, global_args, ReturnOutput::Stderr))
     }
 
     pub fn jj_duplicate(
@@ -346,19 +527,19 @@ impl JjCommand {
             args.push(destination_type);
             args.push(destination);
         }
-        Self::new(&args, global_args, None, ReturnOutput::Stderr)
+        Self(JjCommandSpec::new(&args, global_args, ReturnOutput::Stderr))
     }
 
     pub fn jj_new(target: &str, flags: &[&str], global_args: GlobalArgs) -> Self {
         let mut args = vec!["new"];
         args.extend_from_slice(flags);
         args.push(target);
-        Self::new(&args, global_args, None, ReturnOutput::Stderr)
+        Self(JjCommandSpec::new(&args, global_args, ReturnOutput::Stderr))
     }
 
     pub fn jj_parallelize(revset: &str, global_args: GlobalArgs) -> Self {
         let args = ["parallelize", revset];
-        Self::new(&args, global_args, None, ReturnOutput::Stderr)
+        Self(JjCommandSpec::new(&args, global_args, ReturnOutput::Stderr))
     }
 
     pub fn jj_next_prev(
@@ -374,7 +555,7 @@ impl JjCommand {
         if let Some(offset) = offset {
             args.push(offset);
         }
-        Self::new(&args, global_args, None, ReturnOutput::Stderr)
+        Self(JjCommandSpec::new(&args, global_args, ReturnOutput::Stderr))
     }
 
     pub fn jj_abandon(change_id: &str, mode: Option<&str>, global_args: GlobalArgs) -> Self {
@@ -383,7 +564,7 @@ impl JjCommand {
             args.push(mode);
         }
         args.push(change_id);
-        Self::new(&args, global_args, None, ReturnOutput::Stderr)
+        Self(JjCommandSpec::new(&args, global_args, ReturnOutput::Stderr))
     }
 
     pub fn jj_absorb(
@@ -400,7 +581,7 @@ impl JjCommand {
         if let Some(file_path) = maybe_file_path {
             args.push(file_path);
         }
-        Self::new(&args, global_args, None, ReturnOutput::Stderr)
+        Self(JjCommandSpec::new(&args, global_args, ReturnOutput::Stderr))
     }
 
     pub fn jj_revert(
@@ -410,45 +591,27 @@ impl JjCommand {
         global_args: GlobalArgs,
     ) -> Self {
         let args = ["revert", "-r", revision, destination_type, destination];
-        Self::new(&args, global_args, None, ReturnOutput::Stderr)
+        Self(JjCommandSpec::new(&args, global_args, ReturnOutput::Stderr))
     }
 
     pub fn jj_sign(action: &str, revset: &str, global_args: GlobalArgs) -> Self {
         let args = [action, "-r", revset];
-        Self::new(&args, global_args, None, ReturnOutput::Stderr)
-    }
-
-    pub fn jj_show(change_id: &str, global_args: GlobalArgs, term: Term) -> Self {
-        let args = ["show", change_id];
-        Self::new_skip_sync(&args, global_args, Some(term), ReturnOutput::Stderr)
-    }
-
-    pub fn jj_status(global_args: GlobalArgs, term: Term) -> Self {
-        let args = ["status"];
-        Self::new_skip_sync(&args, global_args, Some(term), ReturnOutput::Stderr)
+        Self(JjCommandSpec::new(&args, global_args, ReturnOutput::Stderr))
     }
 
     pub fn jj_simplify_parents(revision: &str, mode: &str, global_args: GlobalArgs) -> Self {
         let args = ["simplify-parents", mode, revision];
-        Self::new(&args, global_args, None, ReturnOutput::Stderr)
+        Self(JjCommandSpec::new(&args, global_args, ReturnOutput::Stderr))
     }
 
     pub fn jj_undo(global_args: GlobalArgs) -> Self {
         let args = ["undo"];
-        Self::new(&args, global_args, None, ReturnOutput::Stderr)
+        Self(JjCommandSpec::new(&args, global_args, ReturnOutput::Stderr))
     }
 
     pub fn jj_redo(global_args: GlobalArgs) -> Self {
         let args = ["redo"];
-        Self::new(&args, global_args, None, ReturnOutput::Stderr)
-    }
-
-    pub fn jj_commit(maybe_file_path: Option<&str>, global_args: GlobalArgs, term: Term) -> Self {
-        let mut args = vec!["commit"];
-        if let Some(file_path) = maybe_file_path {
-            args.push(file_path);
-        }
-        Self::new(&args, global_args, Some(term), ReturnOutput::Stderr)
+        Self(JjCommandSpec::new(&args, global_args, ReturnOutput::Stderr))
     }
 
     pub fn jj_rebase(
@@ -459,63 +622,11 @@ impl JjCommand {
         global_args: GlobalArgs,
     ) -> Self {
         let args = vec!["rebase", source_type, source, destination_type, destination];
-        Self::new(&args, global_args, None, ReturnOutput::Stderr)
+        Self(JjCommandSpec::new(&args, global_args, ReturnOutput::Stderr))
     }
 
     pub fn jj_raw(args: &str, global_args: GlobalArgs) -> Result<Self> {
-        let parsed = shell_words::split(args)?;
-        Ok(Self {
-            args: parsed,
-            global_args,
-            interactive_term: None,
-            return_output: ReturnOutput::Combined,
-            sync: true,
-            color: true,
-        })
-    }
-
-    pub fn jj_raw_interactive(args: &str, global_args: GlobalArgs, term: Term) -> Result<Self> {
-        let parsed = shell_words::split(args)?;
-        Ok(Self {
-            args: parsed,
-            global_args,
-            interactive_term: Some(term),
-            return_output: ReturnOutput::Combined,
-            sync: true,
-            color: true,
-        })
-    }
-
-    pub fn jj_split(
-        change_id: &str,
-        destination_type: Option<&str>,
-        destination: Option<&str>,
-        parallel: bool,
-        global_args: GlobalArgs,
-        term: Term,
-    ) -> Self {
-        let mut args = vec!["split", "--revision", change_id];
-        if parallel {
-            args.push("--parallel");
-        }
-        if let (Some(destination_type), Some(destination)) = (destination_type, destination) {
-            args.push(destination_type);
-            args.push(destination);
-        }
-        Self::new(&args, global_args, Some(term), ReturnOutput::Stderr)
-    }
-
-    pub fn jj_resolve(
-        change_id: &str,
-        maybe_file_path: Option<&str>,
-        global_args: GlobalArgs,
-        term: Term,
-    ) -> Self {
-        let mut args = vec!["resolve", "-r", change_id];
-        if let Some(file_path) = maybe_file_path {
-            args.push(file_path);
-        }
-        Self::new(&args, global_args, Some(term), ReturnOutput::Stderr)
+        Ok(Self(JjCommandSpec::new_raw(args, global_args)?))
     }
 
     pub fn jj_restore(
@@ -528,10 +639,10 @@ impl JjCommand {
         if let Some(file_path) = maybe_file_path {
             args.push(file_path);
         }
-        Self::new(&args, global_args, None, ReturnOutput::Stderr)
+        Self(JjCommandSpec::new(&args, global_args, ReturnOutput::Stderr))
     }
 
-    pub fn jj_squash_noninteractive(
+    pub fn jj_squash(
         change_id: &str,
         maybe_file_path: Option<&str>,
         global_args: GlobalArgs,
@@ -540,81 +651,40 @@ impl JjCommand {
         if let Some(file_path) = maybe_file_path {
             args.push(file_path);
         }
-        Self::new(&args, global_args, None, ReturnOutput::Stderr)
-    }
-
-    pub fn jj_squash_interactive(
-        change_id: &str,
-        maybe_file_path: Option<&str>,
-        global_args: GlobalArgs,
-        term: Term,
-    ) -> Self {
-        let mut args = vec!["squash", "--revision", change_id];
-        if let Some(file_path) = maybe_file_path {
-            args.push(file_path);
-        }
-        Self::new(&args, global_args, Some(term), ReturnOutput::Stderr)
-    }
-
-    pub fn jj_squash_into_interactive(
-        from_change_id: &str,
-        into_change_id: &str,
-        maybe_file_path: Option<&str>,
-        global_args: GlobalArgs,
-        term: Term,
-    ) -> Self {
-        let mut args = vec!["squash", "--from", from_change_id, "--into", into_change_id];
-        if let Some(file_path) = maybe_file_path {
-            args.push(file_path);
-        }
-        Self::new(&args, global_args, Some(term), ReturnOutput::Stderr)
+        Self(JjCommandSpec::new(&args, global_args, ReturnOutput::Stderr))
     }
 
     pub fn jj_edit(change_id: &str, global_args: GlobalArgs) -> Self {
         let args = ["edit", change_id];
-        Self::new(&args, global_args, None, ReturnOutput::Stderr)
-    }
-
-    pub fn jj_evolog(change_id: &str, patch: bool, global_args: GlobalArgs, term: Term) -> Self {
-        let mut args = vec!["evolog", "-r", change_id];
-        if patch {
-            args.push("--patch");
-        }
-        Self::new_skip_sync(&args, global_args, Some(term), ReturnOutput::Stderr)
-    }
-
-    pub fn jj_interdiff(
-        from: &str,
-        to: &str,
-        maybe_file_path: Option<&str>,
-        global_args: GlobalArgs,
-        term: Term,
-    ) -> Self {
-        let mut args = vec!["interdiff", "--from", from, "--to", to];
-        if let Some(path) = maybe_file_path {
-            args.push(path);
-        }
-        Self::new_skip_sync(&args, global_args, Some(term), ReturnOutput::Stderr)
+        Self(JjCommandSpec::new(&args, global_args, ReturnOutput::Stderr))
     }
 
     pub fn jj_file_list(global_args: GlobalArgs) -> Self {
         let args = ["file", "list"];
-        Self::new_no_color(&args, global_args, ReturnOutput::Stdout)
+        Self(JjCommandSpec::new_no_color(
+            &args,
+            global_args,
+            ReturnOutput::Stdout,
+        ))
     }
 
     pub fn jj_file_show(change_id: &str, file_path: &str, global_args: GlobalArgs) -> Self {
         let args = ["file", "show", "--revision", change_id, file_path];
-        Self::new_no_color(&args, global_args, ReturnOutput::Stdout)
+        Self(JjCommandSpec::new_no_color(
+            &args,
+            global_args,
+            ReturnOutput::Stdout,
+        ))
     }
 
     pub fn jj_file_track(file_path: &str, global_args: GlobalArgs) -> Self {
         let args = ["file", "track", file_path];
-        Self::new(&args, global_args, None, ReturnOutput::Stderr)
+        Self(JjCommandSpec::new(&args, global_args, ReturnOutput::Stderr))
     }
 
     pub fn jj_file_untrack(file_path: &str, global_args: GlobalArgs) -> Self {
         let args = ["file", "untrack", file_path];
-        Self::new(&args, global_args, None, ReturnOutput::Stderr)
+        Self(JjCommandSpec::new(&args, global_args, ReturnOutput::Stderr))
     }
 
     pub fn jj_metaedit(
@@ -628,7 +698,7 @@ impl JjCommand {
             args.push(value);
         }
         args.push(change_id);
-        Self::new(&args, global_args, None, ReturnOutput::Stderr)
+        Self(JjCommandSpec::new(&args, global_args, ReturnOutput::Stderr))
     }
 
     pub fn jj_git_fetch(flag: Option<&str>, value: Option<&str>, global_args: GlobalArgs) -> Self {
@@ -639,7 +709,7 @@ impl JjCommand {
         if let Some(value) = value {
             args.push(value);
         }
-        Self::new(&args, global_args, None, ReturnOutput::Stderr)
+        Self(JjCommandSpec::new(&args, global_args, ReturnOutput::Stderr))
     }
 
     pub fn jj_git_push(flag: Option<&str>, value: Option<&str>, global_args: GlobalArgs) -> Self {
@@ -650,12 +720,16 @@ impl JjCommand {
         if let Some(value) = value {
             args.push(value);
         }
-        Self::new(&args, global_args, None, ReturnOutput::Stderr)
+        Self(JjCommandSpec::new(&args, global_args, ReturnOutput::Stderr))
     }
 
     pub fn jj_git_remote_list(global_args: GlobalArgs) -> Self {
         let args = ["git", "remote", "list"];
-        Self::new_skip_sync(&args, global_args, None, ReturnOutput::Stdout)
+        Self(JjCommandSpec::new_skip_sync(
+            &args,
+            global_args,
+            ReturnOutput::Stdout,
+        ))
     }
 
     pub fn jj_bookmark_create(
@@ -670,12 +744,12 @@ impl JjCommand {
             change_id,
             bookmark_names,
         ];
-        Self::new(&args, global_args, None, ReturnOutput::Stderr)
+        Self(JjCommandSpec::new(&args, global_args, ReturnOutput::Stderr))
     }
 
     pub fn jj_bookmark_delete(bookmark_names: &str, global_args: GlobalArgs) -> Self {
         let args = ["bookmark", "delete", bookmark_names];
-        Self::new(&args, global_args, None, ReturnOutput::Stderr)
+        Self(JjCommandSpec::new(&args, global_args, ReturnOutput::Stderr))
     }
 
     pub fn jj_bookmark_forget(
@@ -688,17 +762,21 @@ impl JjCommand {
             args.push("--include-remotes");
         }
         args.push(bookmark_names);
-        Self::new(&args, global_args, None, ReturnOutput::Stderr)
+        Self(JjCommandSpec::new(&args, global_args, ReturnOutput::Stderr))
     }
 
     pub fn jj_bookmark_advance(to_change_id: &str, global_args: GlobalArgs) -> Self {
         let args = ["bookmark", "advance", "--to", to_change_id];
-        Self::new(&args, global_args, None, ReturnOutput::Stderr)
+        Self(JjCommandSpec::new(&args, global_args, ReturnOutput::Stderr))
     }
 
     pub fn jj_bookmark_list_all_names(global_args: GlobalArgs) -> Self {
         let args = ["bookmark", "list", "--all-remotes", "-T", r#"name ++ "\n""#];
-        Self::new_skip_sync(&args, global_args, None, ReturnOutput::Stdout)
+        Self(JjCommandSpec::new_skip_sync(
+            &args,
+            global_args,
+            ReturnOutput::Stdout,
+        ))
     }
 
     pub fn jj_bookmark_list_tracked_remote(global_args: GlobalArgs) -> Self {
@@ -709,7 +787,11 @@ impl JjCommand {
             "-T",
             r#"if(remote, name ++ "@" ++ remote ++ "\n")"#,
         ];
-        Self::new_no_color(&args, global_args, ReturnOutput::Stdout)
+        Self(JjCommandSpec::new_no_color(
+            &args,
+            global_args,
+            ReturnOutput::Stdout,
+        ))
     }
 
     pub fn jj_bookmark_list_untracked_remote(global_args: GlobalArgs) -> Self {
@@ -720,7 +802,11 @@ impl JjCommand {
             "-T",
             r#"if(remote && !tracked, name ++ "@" ++ remote ++ "\n")"#,
         ];
-        Self::new_no_color(&args, global_args, ReturnOutput::Stdout)
+        Self(JjCommandSpec::new_no_color(
+            &args,
+            global_args,
+            ReturnOutput::Stdout,
+        ))
     }
 
     pub fn jj_bookmark_list_all_display(global_args: GlobalArgs) -> Self {
@@ -731,12 +817,20 @@ impl JjCommand {
             "-T",
             r#"if(remote, name ++ "@" ++ remote, name) ++ "\n""#,
         ];
-        Self::new_no_color(&args, global_args, ReturnOutput::Stdout)
+        Self(JjCommandSpec::new_no_color(
+            &args,
+            global_args,
+            ReturnOutput::Stdout,
+        ))
     }
 
     pub fn jj_bookmark_list_local_only_names(global_args: GlobalArgs) -> Self {
         let args = ["bookmark", "list", "-T", r#"if(!remote, name ++ "\n")"#];
-        Self::new_no_color(&args, global_args, ReturnOutput::Stdout)
+        Self(JjCommandSpec::new_no_color(
+            &args,
+            global_args,
+            ReturnOutput::Stdout,
+        ))
     }
 
     pub fn jj_bookmark_list_conflicted_names(global_args: GlobalArgs) -> Self {
@@ -747,7 +841,11 @@ impl JjCommand {
             "-T",
             r#"if(!remote, name ++ "\n")"#,
         ];
-        Self::new_no_color(&args, global_args, ReturnOutput::Stdout)
+        Self(JjCommandSpec::new_no_color(
+            &args,
+            global_args,
+            ReturnOutput::Stdout,
+        ))
     }
 
     pub fn jj_bookmark_move(
@@ -767,7 +865,7 @@ impl JjCommand {
         if allow_backwards {
             args.push("--allow-backwards");
         }
-        Self::new(&args, global_args, None, ReturnOutput::Stderr)
+        Self(JjCommandSpec::new(&args, global_args, ReturnOutput::Stderr))
     }
 
     pub fn jj_bookmark_rename(
@@ -776,7 +874,7 @@ impl JjCommand {
         global_args: GlobalArgs,
     ) -> Self {
         let args = ["bookmark", "rename", old_bookmark_name, new_bookmark_name];
-        Self::new(&args, global_args, None, ReturnOutput::Stderr)
+        Self(JjCommandSpec::new(&args, global_args, ReturnOutput::Stderr))
     }
 
     pub fn jj_bookmark_set(
@@ -789,17 +887,17 @@ impl JjCommand {
         if allow_backwards {
             args.push("--allow-backwards");
         }
-        Self::new(&args, global_args, None, ReturnOutput::Stderr)
+        Self(JjCommandSpec::new(&args, global_args, ReturnOutput::Stderr))
     }
 
     pub fn jj_bookmark_track(bookmark_at_remote: &str, global_args: GlobalArgs) -> Self {
         let args = ["bookmark", "track", bookmark_at_remote];
-        Self::new(&args, global_args, None, ReturnOutput::Stderr)
+        Self(JjCommandSpec::new(&args, global_args, ReturnOutput::Stderr))
     }
 
     pub fn jj_bookmark_untrack(bookmark_at_remote: &str, global_args: GlobalArgs) -> Self {
         let args = ["bookmark", "untrack", bookmark_at_remote];
-        Self::new(&args, global_args, None, ReturnOutput::Stderr)
+        Self(JjCommandSpec::new(&args, global_args, ReturnOutput::Stderr))
     }
 
     pub fn jj_config_get_revsets_log(repository: &str) -> Result<String, JjCommandError> {
@@ -828,7 +926,11 @@ impl JjCommand {
             "-T",
             r#"name ++ "\n""#,
         ];
-        Self::new_no_color(&args, global_args, ReturnOutput::Stdout)
+        Self(JjCommandSpec::new_no_color(
+            &args,
+            global_args,
+            ReturnOutput::Stdout,
+        ))
     }
 
     pub fn jj_workspace_list_current_name(global_args: GlobalArgs) -> Self {
@@ -839,7 +941,11 @@ impl JjCommand {
             "-T",
             r#"if(target.current_working_copy(), name ++ "\n")"#,
         ];
-        Self::new_no_color(&args, global_args, ReturnOutput::Stdout)
+        Self(JjCommandSpec::new_no_color(
+            &args,
+            global_args,
+            ReturnOutput::Stdout,
+        ))
     }
 
     pub fn jj_workspace_add(
@@ -853,23 +959,23 @@ impl JjCommand {
             args.push(n);
         }
         args.push(destination);
-        Self::new(&args, global_args, None, ReturnOutput::Stderr)
+        Self(JjCommandSpec::new(&args, global_args, ReturnOutput::Stderr))
     }
 
     pub fn jj_workspace_forget(names: &[&str], global_args: GlobalArgs) -> Self {
         let mut args = vec!["workspace", "forget"];
         args.extend(names);
-        Self::new(&args, global_args, None, ReturnOutput::Stderr)
+        Self(JjCommandSpec::new(&args, global_args, ReturnOutput::Stderr))
     }
 
     pub fn jj_workspace_rename(new_name: &str, global_args: GlobalArgs) -> Self {
         let args = ["workspace", "rename", new_name];
-        Self::new(&args, global_args, None, ReturnOutput::Stderr)
+        Self(JjCommandSpec::new(&args, global_args, ReturnOutput::Stderr))
     }
 
     pub fn jj_workspace_update_stale(global_args: GlobalArgs) -> Self {
         let args = ["workspace", "update-stale"];
-        Self::new(&args, global_args, None, ReturnOutput::Stderr)
+        Self(JjCommandSpec::new(&args, global_args, ReturnOutput::Stderr))
     }
 
     pub fn jj_ensure_valid_repo(repository: &str) -> Result<String, JjCommandError> {
@@ -947,11 +1053,9 @@ fn combine_output(stdout: String, stderr: String) -> String {
     }
 }
 
-pub fn open_file_in_editor(interactive_term: Term, file_path: &str) -> Result<()> {
+pub fn open_file_in_editor(terminal: &mut Terminal, file_path: &str) -> Result<()> {
     let editor = env::var("EDITOR").unwrap_or_else(|_| "vim".to_string());
-    terminal::relinquish_terminal()?;
-    let status = Command::new(&editor).arg(file_path).status()?;
-    terminal::takeover_terminal(&interactive_term)?;
+    let status = terminal.with_suspended(|| Command::new(&editor).arg(file_path).status())??;
     if !status.success() {
         anyhow::bail!("'{editor}' exited with status {status} for '{file_path}'");
     }

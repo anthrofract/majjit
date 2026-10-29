@@ -15,7 +15,7 @@ use anyhow::Result;
 use clap::Parser;
 use model::DEFAULT_REVSET;
 use shell_out::JjCommand;
-use terminal::Term;
+use terminal::Terminal;
 use watchman::WatchmanMonitor;
 
 #[derive(Parser, Debug)]
@@ -42,22 +42,20 @@ fn main() {
 fn run() -> Result<()> {
     let args = Args::parse();
     let repository = JjCommand::jj_ensure_valid_repo(&args.repository)?;
-    let terminal = terminal::init_terminal()?;
-    let model = Model::new(
-        repository.clone(),
-        args.revisions,
-        terminal::detect_terminal_theme()?,
-    )?;
+    let mut terminal = Terminal::new()?;
+    let model = Model::new(repository.clone(), args.revisions, terminal.detect_theme()?)?;
     let watchman = WatchmanMonitor::start(repository)?;
-    let result = tui_loop(model, terminal.clone(), watchman);
-    terminal::relinquish_terminal()?;
-    result
+    tui_loop(model, &mut terminal, watchman)
 }
 
-fn tui_loop(mut model: Model, terminal: Term, watchman: Option<WatchmanMonitor>) -> Result<()> {
+fn tui_loop(
+    mut model: Model,
+    terminal: &mut Terminal,
+    watchman: Option<WatchmanMonitor>,
+) -> Result<()> {
     while model.state != State::Quit {
-        terminal.borrow_mut().draw(|f| view(&mut model, f))?;
-        update(terminal.clone(), &mut model, watchman.as_ref())?;
+        terminal.draw(|f| view(&mut model, f))?;
+        update(terminal, &mut model, watchman.as_ref())?;
     }
     Ok(())
 }
