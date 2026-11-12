@@ -961,8 +961,11 @@ impl LogTreeNode for DiffHunkLine {
     fn render(&self) -> Result<Text<'static>> {
         let clean_string = strip_ansi(&self.ansi_string);
         let mut line = Line::from(vec![Span::raw(self.graph_indent.clone()), Span::raw("  ")]);
+        for mut span in self.ansi_string.into_text()?.lines[0].spans.clone() {
+            if span.content.contains('\t') {
+                span.content = span.content.replace('\t', "    ").into();
+            }
 
-        for span in self.ansi_string.into_text()?.lines[0].spans.clone() {
             let span = if clean_string.starts_with("+") || clean_string.starts_with("-") {
                 let style = span.style.bold();
                 span.style(style)
